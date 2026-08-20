@@ -1,0 +1,73 @@
+[
+  {"q": "why is the rate limiter backed by the database instead of kept in memory?",
+   "marker": "Postgres-backed",
+   "note": "semantic: the docs never use the phrase 'rate limiter backed by the database'"},
+
+  {"q": "how do I wipe my local database and start over?",
+   "marker": "make reset",
+   "note": "query shares almost no words with the answer"},
+
+  {"q": "what port does local Postgres listen on?",
+   "marker": "5433",
+   "note": "lexical: a rare exact token, BM25 territory"},
+
+  {"q": "why run migrations on the direct connection instead of the pooler?",
+   "marker": "DDL through",
+   "note": ""},
+
+  {"q": "is a user's email address ever shown publicly?",
+   "marker": "never rendered",
+   "note": ""},
+
+  {"q": "how is GPS data removed from uploaded photos?",
+   "marker": "EXIF",
+   "note": "docs say 're-encoded from raw pixels', not 'GPS removed'"},
+
+  {"q": "what does it mean for someone to have the ball?",
+   "marker": "owns the next action",
+   "note": ""},
+
+  {"q": "start the frontend dev server with hot reload",
+   "marker": "5173",
+   "note": "AMBIGUOUS ON PURPOSE: three separate repos run Vite on 5173"},
+
+  {"q": "what is the mullet stack?",
+   "marker": "JavaScript in the front",
+   "note": ""},
+
+  {"q": "where do the TypeScript types stop lining up with the Python ones?",
+   "marker": "where the types stop",
+   "note": ""},
+
+  {"q": "how do I print flyers for local events?",
+   "marker": "Print local event flyers",
+   "note": ""},
+
+  {"q": "what colors does the site use?",
+   "marker": "Color Palette",
+   "note": "'colors' vs 'palette' is a small semantic gap BM25 cannot cross"},
+
+  {"q": "who inspired this project originally?",
+   "marker": "Thibaud",
+   "note": "zero overlapping content words with the answer"},
+
+  {"q": "where has the author worked for the past five years?",
+   "marker": "Koinonia",
+   "note": ""},
+
+  {"q": "why keep JSON-LD if the guidance says not to?",
+   "marker": "entity resolution",
+   "note": "rare exact token in the query, but the answer is phrased differently"},
+
+  {"q": "how do I serve the documentation site locally?",
+   "marker": "Serve docs locally",
+   "note": "many repos have a 'run it locally' section: distractor-heavy"},
+
+  {"q": "what tone should recommendations be written in?",
+   "marker": "Be a friend",
+   "note": ""},
+
+  {"q": "why does the app avoid writing files to local disk?",
+   "marker": "No persistent volumes",
+   "note": "pure semantic match"}
+]
