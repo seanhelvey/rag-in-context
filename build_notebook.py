@@ -18,6 +18,22 @@ is usually missing from tutorials that search Wikipedia.
 **The whole idea in one line:** the model can't see your documents, so find the few
 paragraphs most likely to answer the question and paste them into the prompt.
 Everything below is about *find*.
+
+### Four words used throughout
+
+Worth pinning down now, because everything after this is built out of them:
+
+- **Corpus** — the pile of documents you want to search. Here, 13 markdown files.
+- **Chunk** — one searchable piece of a document, usually a section or paragraph.
+  Retrieval returns chunks, not files, and a chunk is what ends up in the prompt.
+- **Embedding** — a list of numbers (here, 384 of them) that a neural network
+  produces for a piece of text, arranged so that text with similar *meaning* gets
+  similar numbers. That last part is the whole trick.
+- **Retrieval** — given a question, ranking every chunk by how likely it is to
+  contain the answer, and keeping the top few.
+
+Nothing here assumes background beyond numpy and the general idea that a neural
+network can turn text into vectors.
 ''')
 
 md('''
@@ -148,10 +164,14 @@ print("every row is unit length:", np.allclose(np.linalg.norm(E, axis=1), 1.0))
 md('''
 ### Is there structure in there?
 
+384 numbers per chunk is not something you can look at. PCA (principal component
+analysis) finds the two directions along which the data varies most and flattens
+everything onto those so it can be drawn — a shadow of a 384-dimensional object cast
+onto a wall.
+
 If embeddings are doing their job, chunks from the same project should land near each
-other without anyone telling the model which project they came from. Projecting 384
-dimensions down to 2 with PCA throws away most of the information, so treat clumping
-as encouraging rather than as proof.
+other, without anyone having told the model which project they came from. But a shadow
+loses information, so treat clumping here as encouraging rather than as proof.
 ''')
 
 code('''
@@ -190,7 +210,7 @@ picks = [
     ("ball/dev server",  find("hot module reload")),
     ("mullet/where types stop", find("where the types stop")),
     ("coloft/palette",   find("Color Palette")),
-    ("fingerprint/credit", find("Thibaud")),
+    ("site/leave alone",  find("intentional, do not")),
     ("bio/koinonia",     find("Koinonia")),
 ]
 names = [n for n, _ in picks]
@@ -243,9 +263,20 @@ index (HNSW, IVF) so it stays fast when there are 100 million rows instead of 20
 At this scale an exact scan is *faster* than any index, and approximate search would
 only cost recall. Reaching for Pinecone here would be the wrong call.
 
-Now the other half. BM25 is keyword search — TF-IDF with two corrections that matter:
-term frequency saturates (the 20th "postgres" adds almost nothing over the 3rd), and
-long documents get penalized so they can't win by sheer surface area.
+Now the other half: **BM25**, the keyword-search algorithm that has been a search
+engine default since the 1990s and is still hard to beat.
+
+It scores a chunk by the query words it literally contains, weighted by two ideas:
+
+- **Term frequency** — a chunk mentioning "postgres" five times beats one mentioning
+  it once.
+- **Inverse document frequency (IDF)** — a word that appears in *every* chunk tells
+  you nothing, so it counts for almost nothing. "the" is worthless; "5433" is gold.
+
+BM25 adds two corrections. Term frequency **saturates** (the 20th "postgres" adds
+almost nothing over the 3rd), and long chunks are **penalized** so they can't win just
+by being big enough to contain everything. The `k1` and `b` constants below control
+those two curves; the values are the standard defaults and are rarely worth tuning.
 ''')
 
 code('''
@@ -396,7 +427,7 @@ Everything above is a plausible story. None of it is evidence.
 The 18 questions in `queries.json` are hand-labelled, and *how* they're labelled is
 the part worth copying. Each one carries a **marker**: the exact string that has to
 appear in a retrieved passage for the retrieval to count. `"make reset"`,
-`"No persistent volumes"`, `"Thibaud"`. Writing them took about twenty minutes and it
+`"No persistent volumes"`, `"5433"`. Writing them took about twenty minutes and it
 is the only reason any number below means anything.
 
 The alternative — label which *file* answers each question — is easier and useless
@@ -405,9 +436,16 @@ first and every method scored 1.00. Grading at the passage level asks the questi
 that actually matters: did the paragraph containing the answer make it into the
 prompt?
 
-- **recall@5** — did the right passage make the top 5? This is the number that
-  matters, because a chunk that isn't retrieved cannot possibly be used.
-- **MRR** — how high did the first correct hit land? Rewards getting it to rank 1.
+Two numbers, both standard in search evaluation:
+
+- **recall@5** — of the 18 questions, what fraction had the right passage somewhere
+  in the top 5? This is the one that matters most, because a chunk that isn't
+  retrieved cannot possibly be used, no matter how good the language model is.
+- **MRR (mean reciprocal rank)** — how *high* did the first correct hit land?
+  Score 1 if it was ranked first, 1/2 if second, 1/3 if third, 0 if it never showed
+  up, then average over all questions. Recall asks "did we find it"; MRR asks
+  "did we find it *first*". They come apart, and where they come apart is
+  informative — as the chart below shows.
 ''')
 
 code('''
@@ -453,15 +491,17 @@ plt.tight_layout(); plt.show()
 md('''
 Three things to read off that chart:
 
-1. **Dense and BM25 tie at 0.83, and fail on different questions.** That is the whole
+1. **Dense and BM25 tie at 0.78, and fail on different questions.** That is the whole
    argument for hybrid search. If they failed on the *same* questions, fusing them
    would buy nothing — the failure list below is the evidence, not the tie.
-2. **RRF fixes recall but not ranking.** Hybrid recall jumps to 1.00 while MRR barely
-   moves (0.73 → 0.72). Fusion is good at getting the right passage *somewhere* into
-   the top 5. It has no idea which of the five is best.
-3. **The cross-encoder is what fixes ranking.** MRR 0.72 → 0.91 over the same
-   candidates, retrieving nothing new — pure reordering. That sounds cosmetic until
-   you remember the prompt has room for 3 chunks, not 25.
+2. **Fusion buys recall, not ranking.** Hybrid lifts recall 0.78 → 0.89, while MRR
+   actually *drops* slightly (0.69 → 0.65). That looks like a bug and isn't: RRF is
+   good at getting the right passage *somewhere* into the top 5, but it has no idea
+   which of the five is best, so it can shuffle a lucky first-place hit downward
+   while rescuing passages that were missing entirely. Recall up, ordering no better.
+3. **The cross-encoder is what fixes ranking.** MRR 0.65 → 0.85, and recall 0.89 →
+   0.94, over essentially the same candidates — mostly just reordering. That sounds
+   cosmetic until you remember the prompt has room for 3 chunks, not 25.
 
 So the two stages do genuinely different jobs, and "should I add a reranker" and
 "should I add BM25" are not competing answers to the same question.
@@ -483,12 +523,35 @@ for item in queries:
 ''')
 
 md('''
+The last one is the most useful line in this notebook, because *every* method missed
+it. The question is "which parts of the site should I leave alone?" and the passage
+that answers it is headed "Content that is intentional, do not 'fix'".
+
+They mean the same thing and share almost no words. BM25 has nothing to match on.
+The embedding does better — it ranks the right passage **8th out of 199**, so it
+clearly sees some connection — but 8th is not top-5, and fusion and reranking can
+only reorder candidates that retrieval already surfaced. Miss it at the retrieval
+stage and no later stage can save it.
+
+Notice too how low the scores are in that neighbourhood: the top hit scores 0.296 and
+the correct passage 0.220. Nothing here is confident. This is the same point as the
+heatmap in section 2 — a raw cosine score tells you very little on its own.
+
+This failure is what sections 8's first two entries exist to fix: **query rewriting**
+(expanding the question before searching) and **contextual retrieval** (giving each
+chunk a description of where it came from before embedding it). It's a real ceiling,
+and it isn't reached by swapping in a bigger model.
+''')
+
+md('''
 ---
 ## 6. The chunk size knob
 
-One parameter, no model changes. Small chunks are precise but lose the context that
-made them meaningful; large chunks blur several topics into a single vector that
-sits near none of them.
+One parameter, no model changes. The theory says there's a sweet spot: small chunks
+are precise but lose the context that made them meaningful, while large chunks blur
+several topics into a single vector that sits near none of them.
+
+Only half of that shows up here, which is worth seeing rather than being told.
 
 Note that BM25 has to be rebuilt too — document frequency and average document
 length are properties of the chunking, not of the corpus.
@@ -527,18 +590,23 @@ plt.tight_layout(); plt.show()
 ''')
 
 md('''
-There is a peak, and it sits around 900 characters — roughly one medium markdown
-section. Both curves fall off on either side, which is the tradeoff behaving the way
-the theory says it should.
+**The small-chunk penalty is real and the large-chunk penalty is invisible.** Below
+about 450 characters both curves fall off hard — at 200 characters hybrid drops to
+0.72, because a 200-character window cuts sentences in half and strands facts from
+the heading that gave them meaning. Above 450 the curve is essentially flat all the
+way out to 4000.
 
-**Be careful how hard you lean on that.** There are 18 questions, so one question is
-worth 0.06 recall, and the gap between the peak and its neighbours is one or two
-questions wide. The shape is suggestive, not significant. The honest conclusion is
-"900 is a sensible default for documents like these, worth re-checking against a
-bigger eval set" — not "900 is optimal."
+That flat right-hand side is a property of *this corpus*, not a general law. These are
+markdown files with short sections, so even a 4000-character chunk is usually still
+one coherent topic — there is nothing to blur together. On long prose with no headings
+you would expect the right-hand side to fall too, and you would want to check rather
+than assume.
 
-Knowing the resolution of your own evaluation is part of the job. An eval that cannot
-separate 0.94 from 1.00 also cannot referee an argument about chunk size.
+**And be careful how hard you lean on any of it.** There are 18 questions, so one
+question is worth 0.06 recall and most of the wiggles here are one question wide.
+Knowing the resolution of your own evaluation is part of the job: an eval that cannot
+separate 0.89 from 0.94 also cannot referee a fine-grained argument about chunk size.
+It *can* tell you 200 is a bad idea, and that is genuinely useful.
 ''')
 
 md('''
@@ -597,8 +665,9 @@ md('''
 ---
 ## 8. What I left out
 
-Deliberately, to keep this readable. Roughly in order of how much they'd change the
-numbers on a corpus like this:
+Deliberately, to keep this readable. These are here as **vocabulary** — enough to
+recognize the terms and know what problem each one solves, not enough to implement
+them. Roughly in order of how much they'd change the numbers on a corpus like this:
 
 - **Contextual retrieval** — prefix each chunk with a sentence describing where it
   sits in its document before embedding it. Cheap, and it fixes the biggest weakness
@@ -616,10 +685,27 @@ numbers on a corpus like this:
 - **Multi-hop / agentic retrieval** — let the model search, read, and search again,
   for questions no single query can answer.
 
-**The honest summary of everything above:** almost none of the work is in the vector
-math. It is in cutting documents sensibly, keeping keyword search alongside semantic
-search, spending an afternoon writing labelled questions, and then having numbers to
-point at when someone proposes a change.
+---
+## If you remember five things
+
+1. **RAG is attention over a store that doesn't fit in the context window.** Score a
+   query against everything, keep the best few. Section 0.
+2. **Chunking decides more than the model does.** What you retrieve is a chunk, so
+   where you cut is where the answer either survives intact or gets split in half.
+3. **Semantic and keyword search fail differently, so run both.** Embeddings miss
+   exact tokens like `5433`; keywords miss paraphrases like "wipe the database" →
+   `make reset`. Fusing them fixed every question here that either one missed.
+4. **Retrieving and ranking are different jobs.** Fusion got the right passage into
+   the top 5; only the cross-encoder got it to the top. Both stages exist because
+   both problems exist.
+5. **Without labelled questions you are guessing.** Twenty minutes of labelling is
+   what separates "this feels better" from "recall went 0.78 → 0.94", and it is the
+   step people skip.
+
+**The honest summary:** almost none of the work is in the vector math. It is in
+cutting documents sensibly, keeping keyword search alongside semantic search,
+spending an afternoon writing labelled questions, and then having numbers to point at
+when someone proposes a change.
 ''')
 
 nb = {

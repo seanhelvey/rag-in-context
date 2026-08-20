@@ -54,23 +54,37 @@ the surrounding markdown has to change too**:
 
 | method | recall@5 | MRR |
 |---|---|---|
-| dense only | 0.83 | 0.73 |
-| BM25 only | 0.83 | 0.68 |
-| hybrid (RRF) | 1.00 | 0.72 |
-| hybrid + rerank | 1.00 | 0.91 |
+| dense only | 0.78 | 0.69 |
+| BM25 only | 0.78 | 0.62 |
+| hybrid (RRF) | 0.89 | 0.65 |
+| hybrid + rerank | 0.94 | 0.85 |
 
 ## Corpus
 
-`corpus/` is 14 markdown files copied out of my own repos, flattened to
+`corpus/` is 13 markdown files copied out of my own repos, flattened to
 `reponame__FILE.md`. Chosen because I wrote all of it, so whether a retrieval is
 correct is checkable by reading rather than by guessing.
+
+**Only add docs from repos that are already public on GitHub.** `django-fingerprint`
+was removed for this reason: its remote (`seanhelvey/FunDjango`) no longer exists, so
+its README had never been published, and it listed third-party sites' admin paths.
+`howgood-apply` is excluded too — an application to a specific company.
 
 Two properties are load-bearing and should survive any corpus change: dense and BM25
 must fail on *different* questions (that is the entire argument for hybrid search),
 and `:5173` appearing in three separate repos gives a worked example of a question no
 retriever can answer without metadata filtering.
 
-`howgood-apply` is excluded on purpose — it is an application to a specific company.
+## Audience
+
+Written for a technical reader refreshing on RAG, not a specialist — and explicitly
+meant to be usable by someone else in the same position. Practical consequence:
+**define a term the first time it is used.** PCA, IDF, MRR, bi-encoder, cross-encoder
+and the rest all get a sentence in place rather than being assumed. Section 8 is
+labelled as vocabulary so it reads as orientation, not a reading list.
+
+The closing "if you remember five things" recap exists so the notebook can be
+summarized out loud from memory. Keep it in sync with the sections.
 
 ## Style
 
