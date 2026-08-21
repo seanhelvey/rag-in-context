@@ -63,6 +63,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 |---|---|
 | `rag.ipynb` | the notebook, read this |
 | `build_notebook.py` | generates `rag.ipynb`; edit here and re-run, never the JSON |
+| `figures.py` | matplotlib drawing, kept out of the notebook so cells stay short |
 | `corpus/` | 13 markdown files, ~13,000 words, from my own repos |
 | `queries.json` | 18 hand-labelled questions, each with the exact string a correct passage must contain |
 
