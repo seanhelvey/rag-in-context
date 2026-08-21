@@ -38,6 +38,28 @@ cell needs to be written `\\n` so it survives into the notebook.
 - **No vector database, no framework.** `E @ q` is the whole search. The point is that
   a vector DB is that line plus persistence, filtering, and an ANN index. Adding
   LangChain or Pinecone here would delete the thing being taught.
+
+### Where the build-it-yourself line sits
+
+"From scratch" was always a half-truth: the embedding model and the cross-encoder are
+`sentence-transformers` calls, because writing a transformer teaches nothing about
+retrieval. Roughly 120 lines are hand-written, in functions of 4 to 12 lines.
+
+The test for which side a piece falls on: **does writing it yourself expose a decision you
+would otherwise make blindly?**
+
+- *Build it.* `E @ q` (vector search is one matmul), chunking (where you cut, and every
+  library hides it behind `chunk_size=`), `rrf` (why you cannot add a cosine to a log
+  sum), `softmax`, `evaluate` (the step everyone skips).
+- *Import it.* Anything neural. BM25 is the genuine coin-flip, kept hand-written only
+  because the live IDF table is one of the clearest moments in the notebook.
+
+A framework version of this notebook would be about 30 lines and would teach nothing about
+mechanism, and RAGAS-style evaluation would need an LLM, breaking the no-API-keys rule.
+
+The closing **"What you would actually use"** table maps each hand-written piece to its
+production counterpart. Keep it current; it is what makes the from-scratch framing honest
+and gives the reader a path out of the notebook.
 - **Must run offline** once the two models are cached. Verified with
   `HF_HUB_OFFLINE=1`. Interview wifi is not to be trusted.
 - **Outputs stay committed.** The notebook has to read correctly without being run.

@@ -8,10 +8,11 @@ guess the author's words, so `grep "wipe the database"` misses the file that say
 A single notebook that builds **retrieval-augmented generation** up from numpy, one piece
 at a time, on 13 markdown files of real project documentation.
 
-Everything is written out here rather than pulled from a framework or a vector database,
-because building each piece is the quickest way to see what it does. Two small models
-download once (~170 MB); everything after that runs offline on a laptop CPU in about a
-minute.
+No framework, no vector database, no API keys. The embedding model and the reranker are
+ordinary `sentence-transformers` calls, since writing those yourself teaches nothing;
+everything between them is written out so you can read it, and the last section maps each
+piece to what you would use in production. Two small models download once (~170 MB);
+everything after that runs offline on a laptop CPU in about a minute.
 
 It is written to be *read*, not just run. The outputs and figures are committed, so it
 makes sense start to finish without executing a cell.

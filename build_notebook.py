@@ -30,8 +30,10 @@ it is a test bed, not a use case. Checking whether a search result is *right* me
 knowing the material well enough to tell, and on an unfamiliar corpus that is the
 expensive part, which is why so many RAG demos stop before the evaluation.
 
-Everything is written out rather than pulled from a framework or a vector database, which
-keeps it inspectable. A refresher and exploration for me, shared along the way.
+No framework, no vector database, no API keys. The embedding model and the reranker are
+ordinary library calls, since writing those yourself teaches nothing; everything between
+them is written out so you can read it. The last section maps each piece to what you would
+use in production. A refresher and exploration for me, shared along the way.
 
 ### Four words used throughout
 
@@ -897,6 +899,29 @@ numbers on this corpus most.
   some content words.
 - **Late interaction (ColBERT)**: a vector per token instead of per chunk. Near
   cross-encoder quality at closer to bi-encoder speed.
+
+---
+## What you would actually use
+
+Nothing here is written the way you would ship it. Each piece was built to be read, and
+each has an ordinary production counterpart:
+
+| built here | what you would reach for |
+|---|---|
+| `build_chunks` | LangChain's `RecursiveCharacterTextSplitter` |
+| `E @ q` | pgvector's `<=>`, or a dedicated vector database |
+| `bm25_scores` | the `rank_bm25` package, or Postgres full-text search |
+| `rrf` | LangChain's `EnsembleRetriever` |
+| `rerank` | the same `CrossEncoder`, which was a library call already |
+| `evaluate` | RAGAS, or keep your own, which needs no API key and stays honest |
+
+The two hard parts, the embedding model and the cross-encoder, were imported from the
+start. What is hand-written is about 120 lines, and swapping any of it for the library
+version changes a line or two rather than the shape.
+
+That is the useful thing to notice. The engineering is in where you cut the documents,
+whether you run keyword search alongside semantic search, and whether you wrote down the
+labelled questions. None of it is in the storage.
 
 ---
 ## The short version
