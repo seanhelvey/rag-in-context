@@ -6,91 +6,255 @@ def md(s): C.append(("markdown", s.strip()))
 def code(s): C.append(("code", s.strip()))
 
 md('''
-# RAG from scratch, on my own docs
+# RAG from scratch
 
-No API keys, no vector database, no framework. A local embedding model, some numpy,
-and ~14,000 words of README and CLAUDE.md files pulled out of my own repos.
+### The problem
 
-The corpus matters: I wrote all of it, so I can tell whether a retrieval is right
-just by reading it. That is the hardest part of evaluating a real RAG system and it
-is usually missing from tutorials that search Wikipedia.
+Somewhere in a company wiki, a support archive, or a codebase nobody has read end to end,
+there is a paragraph that answers your question. Two things stand between you and it.
 
-**The whole idea in one line:** the model can't see your documents, so find the few
-paragraphs most likely to answer the question and paste them into the prompt.
-Everything below is about *find*.
+**Keyword search makes you guess the author's words.** Search "wipe the database" and you
+will miss the file that says `make reset`.
+
+**A language model has never seen those documents.** Pasting them all into the prompt is
+the obvious fix, and it fails as soon as the corpus outgrows the context window.
+
+**So: find the few paragraphs most likely to answer the question, and paste only those.**
+That finding step is retrieval, and it is where nearly all the engineering lives.
+Sections 0-5 are about *find*. Section 6 covers what happens after.
+
+### Why this corpus
+
+13 markdown files I wrote, far too small to actually need any of this. That is the point:
+it is a test bed, not a use case. Checking whether a search result is *right* means
+knowing the material well enough to tell, and on an unfamiliar corpus that is the
+expensive part, which is why so many RAG demos stop before the evaluation.
+
+Everything is written out rather than pulled from a framework or a vector database, which
+keeps it inspectable. A refresher and exploration for me, shared along the way.
 
 ### Four words used throughout
 
-Worth pinning down now, because everything after this is built out of them:
+- **Corpus**: the documents being searched. Here, 13 markdown files.
+- **Chunk**: one searchable piece of a document. Retrieval returns chunks, not files, and
+  a chunk is what ends up in the prompt.
+- **Embedding**: a list of numbers a neural network produces for text, arranged so
+  similar *meaning* gets similar numbers. That last part is the trick.
+- **Retrieval**: ranking every chunk by how likely it is to answer the question, and
+  keeping the top few.
 
-- **Corpus** — the pile of documents you want to search. Here, 13 markdown files.
-- **Chunk** — one searchable piece of a document, usually a section or paragraph.
-  Retrieval returns chunks, not files, and a chunk is what ends up in the prompt.
-- **Embedding** — a list of numbers (here, 384 of them) that a neural network
-  produces for a piece of text, arranged so that text with similar *meaning* gets
-  similar numbers. That last part is the whole trick.
-- **Retrieval** — given a question, ranking every chunk by how likely it is to
-  contain the answer, and keeping the top few.
+There are two ways to rank, and this notebook uses both. **By keyword**, matching words
+the question literally contains, which is decades old and still works. And **by meaning**,
+matching "wipe my local database" to `make reset` despite no shared words, which is the
+recent part. Each wins on different questions.
 
-Nothing here assumes background beyond numpy and the general idea that a neural
-network can turn text into vectors.
+Assumed background is Python and numpy, specifically that `@` is a dot product. Softmax,
+attention and BM25 get built as they come up.
 ''')
 
 md('''
 ---
-## 0. Attention is already retrieval
+## 0. Scoring with vectors
 
-Worth starting here because it makes RAG feel less like a new trick. A transformer's
-attention layer scores a query against every key, softmaxes the scores into weights,
-and returns a weighted blend of the values.
+Everything rests on one operation: score a question against a pile of candidates, keep the
+best few. Three steps, numpy only. What you build is also, near enough, the attention
+mechanism from the 2017 transformers paper, which gets a couple of lines at the end.
+
+**Step one: scoring.** Suppose text can be turned into vectors so that similar meanings
+point in similar directions. (Section 2 does this for real; here the vectors are made up
+so the numbers stay readable.)
+
+Then scoring is one dot product per candidate. Vectors pointing the same way score high,
+different ways score low. In numpy that is `@`, and a matrix `@` a vector does every row
+at once.
 ''')
 
 code('''
 import numpy as np
 
-def softmax(x):
-    e = np.exp(x - x.max())
-    return e / e.sum()
-
-# Four "tokens". Pretend an encoder produced these 3-d vectors; the labels are
-# just so we can read the result.
+# Four made-up 3-d vectors, one per word. Pretend an encoder produced them.
+# The labels exist only so the output is readable.
 labels = ["postgres", "database", "react", "flyer"]
-K = np.array([[1.0, 0.0, 0.0],
-              [0.9, 0.1, 0.0],
-              [0.0, 1.0, 0.0],
-              [0.0, 0.0, 1.0]])
-V = np.array([[10.0, 0.0], [9.0, 1.0], [0.0, 10.0], [-5.0, -5.0]])
+K = np.array([[1.0, 0.0, 0.0],     # postgres
+              [0.9, 0.1, 0.0],     # database - deliberately close to postgres
+              [0.0, 1.0, 0.0],     # react    - pointing somewhere else entirely
+              [0.0, 0.0, 1.0]])    # flyer    - somewhere else again
 
-q = np.array([1.0, 0.0, 0.0])          # asking about something postgres-shaped
-weights = softmax((K @ q) * 4)          # *4 sharpens it; that's the temperature knob
+q = np.array([1.0, 0.0, 0.0])      # the question, pointing "postgres-ward"
 
-for label, w in zip(labels, weights):
-    print(f"{label:>10}  {w:.3f}")
-print("\\nblended value:", (weights[:, None] * V).sum(0).round(2))
+scores = K @ q                     # one dot product per row, all four at once
+for label, s in zip(labels, scores):
+    print(f"{label:>10}  {s:.2f}")
 ''')
 
 md('''
-That is `softmax(QKᵀ)V` with one query and no batch dimension. Attention **retrieves
-from the context window** using soft weights over everything present.
+`postgres` scores 1.00, `database` 0.90 because it was placed nearby, the two unrelated
+words 0.
 
-RAG is the same operation with two changes: the store is a corpus that does not fit
-in the context window, and the weights are hard — top-k, keep 5, drop the rest. Same
-dot products, different store. That framing is why "just use a longer context window"
-and "use RAG" are answers to the same question, and why the tradeoff is cost and
-latency rather than capability.
+**Step two: scores into weights.** Attention *blends* rows rather than picking one, and
+blending needs weights that are positive and add up to 1. The raw scores sum to 1.90 and
+mean little as proportions.
+
+**Softmax** fixes that in two moves: `np.exp` on every score, which makes everything
+positive and stretches the gaps, then divide by the total so they sum to 1. The
+`- x.max()` is only numerical safety, keeping `exp` from overflowing on large inputs.
+''')
+
+code('''
+def softmax(x):
+    e = np.exp(x - x.max())        # the max subtraction is for numerical safety only
+    return e / e.sum()
+
+w = softmax(scores)
+print("raw scores  ", scores.round(2))
+print("as weights  ", w.round(3), "  sum:", w.sum().round(3))
+
+# Scaling the scores before the softmax controls how sharp the result is. This is the
+# temperature knob: bigger multiplier, more winner-take-all.
+print()
+for mult in (1, 4, 20):
+    print(f"scores x{mult:<3} -> {softmax(scores * mult).round(3)}")
+''')
+
+md('''
+The same four numbers, drawn: both steps of the softmax on the left, and what the
+sharpening knob does to them on the right.
+''')
+
+code('''
+import matplotlib.pyplot as plt
+
+GREEN, BLUE, GREY = "#2a7", "#47c", "#999"
+
+ex  = np.exp(scores - scores.max())
+nrm = ex / ex.sum()
+x, bw = np.arange(4), 0.26
+
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4))
+a1.bar(x - bw, scores, bw, color=GREY,  label="raw score")
+a1.bar(x,      ex,     bw, color=BLUE,  label="after exp")
+a1.bar(x + bw, nrm,    bw, color=GREEN, label="divided by total")
+for i in range(4):
+    a1.text(i + bw, nrm[i] + .03, f"{nrm[i]:.2f}", ha="center", fontsize=8, color=GREEN)
+    if scores[i] == 0:                      # a zero bar has no height, so draw a stub
+        a1.plot([i - bw - .12, i - bw + .12], [0, 0], color=GREY, lw=2.5)
+        a1.text(i - bw, .05, "0", ha="center", fontsize=8, color=GREY)
+a1.annotate("a score of 0 becomes 0.37,\\nnot 0", xy=(2, ex[2]), xytext=(1.75, .72),
+            fontsize=8, color=BLUE, arrowprops=dict(arrowstyle="->", color=BLUE, lw=1))
+a1.set_title("Softmax, one step at a time", fontsize=11)
+a1.legend(fontsize=8, frameon=False, loc="upper right")
+a1.set_ylim(0, 1.25); a1.set_ylabel("value", fontsize=9)
+
+for mult, colour, mark in ((1, GREY, "o"), (4, BLUE, "s"), (20, GREEN, "^")):
+    a2.plot(x, softmax(scores * mult), marker=mark, color=colour, lw=2,
+            label=f"scores x{mult}")
+a2.set_title("The same scores, sharpened", fontsize=11)
+a2.set_ylim(-.05, 1.05); a2.set_ylabel("weight", fontsize=9)
+a2.legend(fontsize=8, frameon=False)
+
+for ax in (a1, a2):
+    ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9)
+    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+plt.tight_layout(); plt.show()
+''')
+
+md('''
+At x1 the weights barely commit: 0.379 for the best match, still 0.139 for a word with
+nothing in common. At x20 the best takes 0.881. Same scores, different sharpness.
+
+**Step three: returning something.** Every row of `K` is a thing being searched *over*.
+Attention gives each row a second vector, holding what to hand back if that row wins.
+That is where the three names come from:
+
+- **query**: what is being asked (our `q`)
+- **key**: what each row is matched *on* (the rows of `K`)
+- **value**: what each row hands *back* (the rows of `V`)
+
+Keys and values stay separate so a row can be findable by one thing and return another.
+Retrieval works the same way later: you match on chunk text, and hand back the chunk plus
+its filename.
+''')
+
+code('''
+# Same four rows, now with something to return. Two numbers each, kept small so the
+# blend is easy to read.
+V = np.array([[10.0,  0.0],        # postgres
+              [ 9.0,  1.0],        # database - a similar payload, as you would hope
+              [ 0.0, 10.0],        # react
+              [-5.0, -5.0]])       # flyer
+
+weights = softmax((K @ q) * 4)     # score, then sharpen, then normalize
+answer  = (weights[:, None] * V).sum(0)   # weighted average of the value rows
+
+for label, weight in zip(labels, weights):
+    print(f"{label:>10}  weight {weight:.3f}")
+print("\\nblended value:", answer.round(2))
+''')
+
+md('''
+The result sits close to the `postgres` and `database` payloads and almost ignores the
+other two, which is the point: the output is mostly made of the rows that matched.
+
+Laid out as columns, the whole operation fits on one screen.
+''')
+
+code('''
+fig, ax = plt.subplots(figsize=(11, 4.2))
+cx = {"key": 0.6, "score": 2.5, "weight": 4.1, "val": 6.2, "contrib": 8.1}
+
+for header, xx in (("key (K)", cx["key"]), ("score = K @ q", cx["score"]),
+                   ("weight = softmax", cx["weight"]), ("value (V)", cx["val"]),
+                   ("weight x value", cx["contrib"])):
+    ax.text(xx, 3.85, header, fontsize=9, fontweight="bold", color="#444")
+
+for y, label, score, wt, v in zip([3, 2, 1, 0], labels, scores, weights, V):
+    ax.text(cx["key"], y, label, fontsize=9, va="center", color="#333")
+    ax.annotate("", xy=(cx["score"] - .25, y), xytext=(cx["key"] + 1.15, y),
+                arrowprops=dict(arrowstyle="->", color="#ccc", lw=1))
+    ax.text(cx["score"], y, f"{score:.2f}", fontsize=9, va="center", color=BLUE)
+    ax.barh(y, wt * 1.7, left=cx["weight"], height=.34, color=GREEN, alpha=.85)
+    ax.text(cx["weight"] + .05 + wt * 1.7, y, f"{wt:.3f}", fontsize=8, va="center",
+            color=GREEN)
+    ax.text(cx["val"], y, f"[{v[0]:>5.1f}, {v[1]:>5.1f}]", fontsize=9, va="center",
+            family="monospace", color="#333")
+    part = wt * v            # fade the rows that barely contribute
+    ax.text(cx["contrib"], y, f"[{part[0]:>5.2f}, {part[1]:>5.2f}]", fontsize=9,
+            va="center", family="monospace", color="#333",
+            alpha=.35 + .65 * min(1, wt * 1.7))
+
+ax.plot([cx["contrib"] - .1, cx["contrib"] + 1.55], [-.55, -.55], color="#444", lw=1)
+ax.text(cx["contrib"], -.95, f"sum  [{answer[0]:.2f}, {answer[1]:.2f}]", fontsize=10,
+        family="monospace", color=GREEN, fontweight="bold", va="center")
+ax.text(cx["key"], -.95, "the blended output, mostly made of the rows that matched",
+        fontsize=9, color=GREEN, va="center")
+ax.set_xlim(0, 10.2); ax.set_ylim(-1.4, 4.3); ax.axis("off")
+ax.set_title("One attention head, column by column", fontsize=11, loc="left")
+plt.tight_layout(); plt.show()
+''')
+
+md('''
+That is one **attention head**, written compactly as `softmax(QKᵀ)V`. In a transformer
+every word runs this same search against every other word, ending up holding a mixture of
+whatever was relevant to it, and because they all look at once it parallelizes, which is
+what the 2017 paper was really about.
+
+So attention is already retrieval, over whatever sits in the context window. RAG is the
+same move with a store too big to fit and hard weights: keep the top 5, drop the rest.
 ''')
 
 md('''
 ---
 ## 1. Chunking
 
-Documents get cut into pieces, and the piece is what gets retrieved. This is the
-least glamorous part of RAG and the one that most often decides whether it works.
+Before anything can be searched, the documents have to be cut into pieces, because a
+piece is what gets retrieved. It is the least glamorous part of RAG and the one that most
+often decides whether it works.
 
-Cut too small and a chunk loses the context that made it meaningful. Cut too large
-and the embedding averages several topics into a vector that is close to nothing.
-I split on markdown headings first, because a heading is an author's own statement
-about where one idea ends, then hard-wrap anything still too long.
+Cut too small and a chunk loses the context that made it meaningful. Cut too large and
+the embedding averages several topics into a vector close to none of them.
+
+The split below goes on markdown headings first, since a heading is the author's own
+mark for where one idea ends, then hard-wraps anything still too long.
 ''')
 
 code('''
@@ -98,6 +262,9 @@ import re, pathlib
 from collections import Counter
 
 CORPUS = pathlib.Path("corpus")
+# Paths here are relative, so the notebook has to run from the repo root. Say so
+# clearly rather than failing later with an empty-corpus error.
+assert CORPUS.is_dir(), f"no corpus/ found from {pathlib.Path.cwd()} - run from the repo root"
 
 def split_sections(text):
     # Split before a heading, so each piece keeps its own heading as a title.
@@ -132,23 +299,75 @@ print(sample["text"][:420])
 ''')
 
 md('''
+Most sections are short enough to pass through whole. The windowing only kicks in on the
+long ones, and this is what it does to a section of 2300 characters.
+''')
+
+code('''
+fig, ax = plt.subplots(figsize=(10, 3.6))
+ORANGE = "#e0a300"
+sec_len, max_chars, overlap = 2300, 900, 150
+
+ax.barh(1.75, sec_len, height=.34, color="#dde6f2", edgecolor=BLUE)
+ax.text(sec_len / 2, 1.75, f"one section, {sec_len} chars", ha="center", va="center",
+        fontsize=9, color=BLUE)
+
+start, row = 0, 0
+while start < sec_len:                      # same loop as window() above
+    end = min(start + max_chars, sec_len)
+    y = 1.0 - row * .42
+    ax.barh(y, end - start, left=start, height=.3, color=GREEN, alpha=.8,
+            edgecolor="white")
+    if start > 0:
+        ax.barh(y, min(overlap, end - start), left=start, height=.3, color=ORANGE,
+                edgecolor="white")
+    if end - start > 260:
+        ax.text((start + end) / 2, y, f"chunk {row + 1}", ha="center", va="center",
+                fontsize=8, color="white", fontweight="bold")
+    else:
+        ax.text(end + 55, y, f"chunk {row + 1} ({end - start} chars)", va="center",
+                fontsize=8, color="#666")
+    start += max_chars - overlap
+    row += 1
+
+ax.text(0, 1.42, "orange marks the 150-char overlap, so a fact sitting on a cut line "
+        "survives whole in at least one chunk", fontsize=8.5, color="#8a6100",
+        va="center")
+ax.set_xlim(-40, sec_len + 430); ax.set_ylim(1.0 - row * .42 - .35, 2.15)
+ax.set_yticks([]); ax.set_xticks([0, 500, 1000, 1500, 2000])
+ax.set_xlabel("characters", fontsize=9)
+ax.set_title(f"Windowing a long section: {max_chars} wide, {overlap} of overlap",
+             fontsize=11, loc="left")
+for side in ("top", "right", "left"):
+    ax.spines[side].set_visible(False)
+plt.tight_layout(); plt.show()
+''')
+
+md('''
+That last sliver is worth noticing. The loop steps forward by `max_chars - overlap`, so
+whatever is left at the end becomes its own chunk however short it is, and a 50-character
+chunk is unlikely to be retrieved for anything. Real chunkers usually fold a runt like
+that back into the previous chunk.
+
 ---
-## 2. Embedding: what the vectors actually look like
+## 2. Embedding
 
-`all-MiniLM-L6-v2` is a 6-layer BERT with 22M parameters. It runs on a laptop CPU in
-seconds and downloads once (~90 MB). The vector for a chunk is the mean of the final
-layer's token vectors — the same pooled representation you'd take off any encoder —
-squashed to 384 dimensions and normalized to unit length.
+`all-MiniLM-L6-v2` is a small transformer: 6 layers, 22M parameters, the same kind of
+attention stack as section 0 but trained to produce vectors rather than text. It runs on a
+laptop CPU in seconds and downloads once (~90 MB).
 
-Normalizing matters for a practical reason: once every vector has length 1, the dot
-product *is* the cosine similarity, so the entire search becomes one matrix multiply.
+Each word gets a vector, and the chunk's vector is their average: 384 numbers, scaled to
+length 1. That scaling pays off immediately, because once every vector has length 1 the
+dot product *is* the cosine similarity, so the whole search becomes one matrix multiply.
 ''')
 
 code('''
 import logging
+from transformers.utils import logging as hf_logging
 from sentence_transformers import SentenceTransformer
 
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+hf_logging.disable_progress_bar()   # keeps a stalled 0% bar out of the saved outputs
 
 encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
@@ -164,14 +383,13 @@ print("every row is unit length:", np.allclose(np.linalg.norm(E, axis=1), 1.0))
 md('''
 ### Is there structure in there?
 
-384 numbers per chunk is not something you can look at. PCA (principal component
-analysis) finds the two directions along which the data varies most and flattens
-everything onto those so it can be drawn — a shadow of a 384-dimensional object cast
-onto a wall.
+Nobody can eyeball 384 numbers, but PCA (principal component analysis) finds the two
+directions the data varies most along and flattens everything onto them, like a shadow of
+a 384-dimensional object cast on a wall.
 
-If embeddings are doing their job, chunks from the same project should land near each
-other, without anyone having told the model which project they came from. But a shadow
-loses information, so treat clumping here as encouraging rather than as proof.
+If the embeddings work, chunks from the same project should land near each other without
+anyone having told the model which project they came from. A shadow loses information, so
+treat clumping as encouraging rather than proof.
 ''')
 
 code('''
@@ -193,9 +411,9 @@ plt.tight_layout(); plt.show()
 ''')
 
 md('''
-The interesting part is where the clusters *overlap*. Anything about running a dev
-server or connecting to a database sits in the same neighbourhood no matter which
-repo it came from — which is exactly the failure mode retrieval has to survive later.
+The interesting part is where clusters *overlap*. Anything about running a dev server
+sits in the same neighbourhood whichever repo it came from, and that overlap is the
+failure mode retrieval has to survive later.
 ''')
 
 code('''
@@ -229,22 +447,25 @@ fig.colorbar(im, shrink=0.8); plt.tight_layout(); plt.show()
 ''')
 
 md('''
-Two things to notice, and both are worth saying out loud:
+Two things in that grid. The infrastructure chunks from one project score high together,
+as hoped. And every pair scores at least 0.1, because these vectors encode "is written in
+English about software" alongside the topic.
 
-- The two infrastructure chunks from the same project score high together. Good.
-- Nothing is near zero. Unrelated English prose still lands around 0.1–0.3, because
-  these vectors encode "is written in English about software" alongside the topic.
-  **Cosine similarity is not a probability.** A score of 0.45 means nothing on its own;
-  it only means something relative to the other scores for the same query. This is why
-  a fixed similarity threshold is a bad way to decide whether to answer.
+So **cosine similarity is not a probability.** A score of 0.45 means nothing alone, only
+something relative to other scores for the same query, which makes a fixed similarity
+threshold a shaky way to decide whether to answer.
 ''')
 
 md('''
 ---
 ## 3. Three ways to search
 
-Each searcher scores every chunk. Keeping them as plain score arrays makes them easy
-to compare and trivial to combine.
+Each searcher scores every chunk, and keeping the results as plain score arrays makes
+them easy to combine.
+
+One convention matters downstream: these functions pass **positions** around, not chunks.
+`top_k` returns indices, and `chunks[i]` gets the text back. Fusion, reranking and the
+eval all shuffle indices, looking up text only at the end.
 ''')
 
 code('''
@@ -253,30 +474,41 @@ def dense_scores(query):
     return E @ q          # cosine similarity, because everything is unit length
 
 def top_k(scores, k=5):
+    # argsort returns the indices that *would* sort the array, not the sorted values.
+    # It sorts ascending, so negating the scores flips it to descending. Net effect:
+    # the positions of the k highest-scoring chunks, best first.
     return np.argsort(-scores)[:k]
+
+demo = "why does the app avoid writing files to local disk?"
+scores = dense_scores(demo)
+print(f"query: {demo}\\n")
+for rank, i in enumerate(top_k(scores, 3), 1):
+    flat = " ".join(chunks[i]["text"].split())      # collapse newlines so this reads as a list
+    print(f"{rank}. {scores[i]:.3f}  {chunks[i]['file']}")
+    print(f"   {flat[:88]}...")
 ''')
 
 md('''
-`E @ q` is the entire vector search. Worth being blunt about this in an interview: a
-vector database is that line plus persistence, metadata filtering, and an approximate
-index (HNSW, IVF) so it stays fast when there are 100 million rows instead of 200.
-At this scale an exact scan is *faster* than any index, and approximate search would
-only cost recall. Reaching for Pinecone here would be the wrong call.
+`E @ q` is the vector search. A vector database is that line plus storage, metadata
+filtering, and an index that finds *approximately* the nearest vectors without scanning
+every one, which starts to matter around 100 million rows. At 199 chunks an exact scan is
+already faster.
 
-Now the other half: **BM25**, the keyword-search algorithm that has been a search
-engine default since the 1990s and is still hard to beat.
+If you have used **pgvector**, `ORDER BY embedding <=> $1` is doing the same cosine
+comparison as this line, and the difference that matters is that the vectors sit beside
+your relational data, so scoping a search to one repo becomes a `WHERE` clause.
 
-It scores a chunk by the query words it literally contains, weighted by two ideas:
+Now the other half: **BM25**, a keyword-search default since the 1990s and still hard to
+beat. It scores a chunk by the query words it literally contains, weighted by two ideas:
 
-- **Term frequency** — a chunk mentioning "postgres" five times beats one mentioning
-  it once.
-- **Inverse document frequency (IDF)** — a word that appears in *every* chunk tells
-  you nothing, so it counts for almost nothing. "the" is worthless; "5433" is gold.
+- **Term frequency**: a chunk mentioning "postgres" five times beats one mentioning it
+  once.
+- **Inverse document frequency (IDF)**: a word appearing in *every* chunk tells you
+  nothing. "the" is worthless; "5433" is gold.
 
-BM25 adds two corrections. Term frequency **saturates** (the 20th "postgres" adds
-almost nothing over the 3rd), and long chunks are **penalized** so they can't win just
-by being big enough to contain everything. The `k1` and `b` constants below control
-those two curves; the values are the standard defaults and are rarely worth tuning.
+Plus two corrections. Term frequency **saturates**, so the 20th "postgres" adds almost
+nothing over the 3rd, and long chunks are **penalized** so they cannot win just by being
+big. `k1` and `b` below control those curves, at their standard defaults.
 ''')
 
 code('''
@@ -287,7 +519,7 @@ def tokenize(s):
 
 def index_bm25(chunks):
     # Every statistic here depends on how the corpus was chunked, so this has to be
-    # rebuilt whenever the chunking changes (see the sweep in section 6).
+    # rebuilt whenever the chunking changes (see the regression demo in section 5).
     global docs, N, avgdl, tf, df, idf
     docs  = [tokenize(c["text"]) for c in chunks]
     N     = len(docs)
@@ -309,19 +541,22 @@ def bm25_scores(query, k1=1.5, b=0.75):
                 dl = len(docs[i])
                 scores[i] += idf[term] * f * (k1 + 1) / (f + k1 * (1 - b + b * dl / avgdl))
     return scores
+
+# IDF in one look. This is the number that makes a rare token worth finding.
+for term in ["the", "database", "postgres", "5433"]:
+    print(f"{term:>10}  in {df[term]:>3} of {N} chunks   idf {idf[term]:.2f}")
 ''')
 
 md('''
-Dense and BM25 fail in opposite directions, which is the whole reason to keep both.
+They fail in opposite directions, which is the reason to keep both. BM25 cannot get from
+"wipe my local database" to `make reset`, with no shared words. Dense retrieval is the one
+that struggles with rare exact tokens: `5433`, an error code, a customer ID, the things
+people actually search for at work.
 
-BM25 cannot match "wipe my local database" to `make reset` — no shared words. Dense
-retrieval, meanwhile, is bad at rare exact tokens: `5433`, `JSON-LD`, a product name,
-an error code, a customer ID. Those are precisely the things people search for at
-work, and they are the reason pure-vector RAG disappoints in production.
-
-Combining them by adding scores does not work — one is a cosine in [0,1], the other
-is an unbounded sum of log terms. Reciprocal rank fusion sidesteps this by throwing
-the scores away and using only the ranks.
+Adding the two score arrays together fails, since one is a cosine in [0,1] and the other
+an unbounded sum of logs. **Reciprocal rank fusion** (RRF on the charts) sidesteps that by
+discarding the scores and using only ranks: first place is first place whatever number
+produced it.
 ''')
 
 code('''
@@ -339,6 +574,10 @@ def hybrid(query, k=5, pool=25):
     d = top_k(dense_scores(query), pool)
     s = top_k(bm25_scores(query), pool)
     return rrf([list(d), list(s)], k=k)
+
+# Toy fusion, to see the voting before it runs on real rankings. C is nobody's
+# favourite but appears in both lists, so it finishes above B, which only one liked.
+print(rrf([["A", "B", "C"], ["C", "A", "D"]], k=4))
 ''')
 
 code('''
@@ -362,18 +601,17 @@ md('''
 ---
 ## 4. Reranking
 
-Retrieval so far has a structural limitation. The chunk embeddings were computed
-*before* anyone asked a question — that is what makes search fast, since the corpus
-is encoded once — but it also means the chunk vector cannot depend on the query. This
-is a **bi-encoder**: two separate passes, compared by dot product.
+Retrieval so far has a built-in limit. Chunk embeddings were computed *before* anyone
+asked a question, which is what makes search fast, but it means a chunk's vector cannot
+depend on the query. That arrangement is a **bi-encoder**: two separate passes, compared
+by dot product.
 
-A **cross-encoder** puts the query and the chunk into the model together, so every
-layer of attention sees both and can compare them token by token. Far more accurate,
-and far too slow to run over the corpus: it is one forward pass per pair, so scoring
-200 chunks means 200 forward passes.
+A **cross-encoder** puts query and chunk into the model together, so attention sees both
+and compares them token by token. Much more accurate, and far too slow for the whole
+corpus: one forward pass per pair means 199 passes per question.
 
-The standard resolution is the cheap-then-expensive cascade: retrieve 25 candidates
-with the fast method, rerank those 25 with the slow one, keep 5.
+Hence the cheap-then-expensive cascade: retrieve 25 candidates fast, rerank those 25
+slowly, keep 5.
 ''')
 
 code('''
@@ -387,6 +625,26 @@ def rerank(query, idxs):
 
 def hybrid_reranked(query, k=5, pool=25):
     return rerank(query, hybrid(query, k=pool, pool=pool))[:k]
+
+# Same three chunks the dense search returned in section 3, rescored. A cross-encoder
+# returns a raw relevance score (a "logit") rather than a cosine: it can be negative,
+# has no fixed range, and only its ordering within one query means anything.
+# Note which chunk it moves to the top.
+for i in top_k(dense_scores(demo), 3):
+    print(f"{reranker.predict([(demo, chunks[i]['text'])])[0]:+7.2f}  {chunks[i]['file']}")
+''')
+
+md('''
+That is the cascade working on three chunks. Dense retrieval put two `SECURITY.md`
+passages on top; the cross-encoder scores them −10.70 and −9.21 and puts the
+`CLAUDE.md` chunk, the one that actually says "No persistent volumes", first at +0.02.
+Same candidates, better order.
+
+The scale is worth a second look. These are logits, so they run negative and have no
+fixed range. Only their order within this one query carries information; the 0.336 from
+the cosine and the +0.02 from the reranker are on different scales entirely.
+
+The chart below shows the same reordering across a larger pool.
 ''')
 
 code('''
@@ -411,48 +669,59 @@ plt.tight_layout(); plt.show()
 ''')
 
 md('''
-I picked that query because three separate repos in this corpus run a Vite dev server
-on port 5173. Retrieval genuinely cannot tell them apart — there is no right answer
-without knowing which project you meant. That is not a bug in the retriever, it is
-missing information in the question, and the honest fix is metadata filtering (scope
-the search to one repo), not a better model.
+That query is in here because three separate repos in this corpus run a Vite dev server
+on port 5173. Retrieval cannot tell them apart, and there is no right answer without
+knowing which project was meant. The gap is in the question rather than the retriever,
+so the fix is metadata filtering, meaning scoping the search to one repo, rather than a
+better model.
 ''')
 
 md('''
 ---
-## 5. Does any of this actually work?
+## 5. Evaluation
 
 Everything above is a plausible story. None of it is evidence.
 
-The 18 questions in `queries.json` are hand-labelled, and *how* they're labelled is
-the part worth copying. Each one carries a **marker**: the exact string that has to
-appear in a retrieved passage for the retrieval to count. `"make reset"`,
-`"No persistent volumes"`, `"5433"`. Writing them took about twenty minutes and it
-is the only reason any number below means anything.
+An eval turns "this feels better" into a number. It works like a test suite: write down
+what the right answer is, then check how often you get it.
 
-The alternative — label which *file* answers each question — is easier and useless
-here. With 14 files, landing the right one in the top 5 is nearly free; I tried it
-first and every method scored 1.00. Grading at the passage level asks the question
-that actually matters: did the paragraph containing the answer make it into the
-prompt?
+**Step one: write down the right answer.** `queries.json` holds 18 questions. Each one
+carries a **marker**, the exact string that has to appear in a retrieved chunk for the
+search to count as correct.
 
-Two numbers, both standard in search evaluation:
+```
+question: "how do I wipe my local database and start over?"
+marker:   "make reset"
+```
 
-- **recall@5** — of the 18 questions, what fraction had the right passage somewhere
-  in the top 5? This is the one that matters most, because a chunk that isn't
-  retrieved cannot possibly be used, no matter how good the language model is.
-- **MRR (mean reciprocal rank)** — how *high* did the first correct hit land?
-  Score 1 if it was ranked first, 1/2 if second, 1/3 if third, 0 if it never showed
-  up, then average over all questions. Recall asks "did we find it"; MRR asks
-  "did we find it *first*". They come apart, and where they come apart is
-  informative — as the chart below shows.
+If a retrieved chunk contains `make reset`, the search found the answer. That is the
+whole labelling scheme.
 ''')
 
 code('''
 import json
 
 queries = json.loads(pathlib.Path("queries.json").read_text())
+item = queries[1]
 
+print("question:", item["q"])
+print("marker:  ", repr(item["marker"]), "\\n")
+
+for i in top_k(dense_scores(item["q"]), 5):
+    found = "FOUND" if item["marker"] in chunks[i]["text"] else "     "
+    print(f"  {found}  {chunks[i]['file']}")
+''')
+
+md('''
+**Step two: count.** Run that check for all 18 questions and take the fraction that found
+their marker in the top 5. That is **recall@5**: of the answers that exist, how many did
+we find, looking at the 5 results the prompt has room for.
+
+**MRR** adds *how high*: score 1 if the right chunk ranked first, 1/2 if second, 1/3 if
+third, 0 if it never appeared, then average.
+''')
+
+code('''
 def evaluate(retrieve, k=5):
     hits, rr = 0, []
     for item in queries:
@@ -489,22 +758,16 @@ plt.tight_layout(); plt.show()
 ''')
 
 md('''
-Three things to read off that chart:
+Three things worth reading off that chart:
 
-1. **Dense and BM25 tie at 0.78, and fail on different questions.** That is the whole
-   argument for hybrid search. If they failed on the *same* questions, fusing them
-   would buy nothing — the failure list below is the evidence, not the tie.
-2. **Fusion buys recall, not ranking.** Hybrid lifts recall 0.78 → 0.89, while MRR
-   actually *drops* slightly (0.69 → 0.65). That looks like a bug and isn't: RRF is
-   good at getting the right passage *somewhere* into the top 5, but it has no idea
-   which of the five is best, so it can shuffle a lucky first-place hit downward
-   while rescuing passages that were missing entirely. Recall up, ordering no better.
-3. **The cross-encoder is what fixes ranking.** MRR 0.65 → 0.85, and recall 0.89 →
-   0.94, over essentially the same candidates — mostly just reordering. That sounds
-   cosmetic until you remember the prompt has room for 3 chunks, not 25.
-
-So the two stages do genuinely different jobs, and "should I add a reranker" and
-"should I add BM25" are not competing answers to the same question.
+1. **Dense and BM25 tie at 0.78, and fail on different questions.** That is the argument
+   for hybrid search. If they failed on the same questions, fusing them would buy
+   nothing. The failure list below is the evidence.
+2. **Fusion buys recall, not ranking.** Hybrid lifts recall 0.78 to 0.89, while MRR
+   *drops* to 0.65. RRF is good at getting the right chunk somewhere into the top 5, but
+   it has no idea which of the five is best.
+3. **The cross-encoder fixes ranking.** MRR 0.65 to 0.85 over the same candidates,
+   mostly just reordering. That matters because the prompt has room for 3 chunks, not 25.
 ''')
 
 code('''
@@ -523,100 +786,60 @@ for item in queries:
 ''')
 
 md('''
-The last one is the most useful line in this notebook, because *every* method missed
-it. The question is "which parts of the site should I leave alone?" and the passage
-that answers it is headed "Content that is intentional, do not 'fix'".
+The last one is the most instructive, because *every* method missed it. The question is
+"which parts of the site should I leave alone?" and the passage answering it is headed
+"Content that is intentional, do not 'fix'". Same meaning, almost no shared words.
 
-They mean the same thing and share almost no words. BM25 has nothing to match on.
-The embedding does better — it ranks the right passage **8th out of 199**, so it
-clearly sees some connection — but 8th is not top-5, and fusion and reranking can
-only reorder candidates that retrieval already surfaced. Miss it at the retrieval
-stage and no later stage can save it.
-
-Notice too how low the scores are in that neighbourhood: the top hit scores 0.296 and
-the correct passage 0.220. Nothing here is confident. This is the same point as the
-heatmap in section 2 — a raw cosine score tells you very little on its own.
-
-This failure is what sections 8's first two entries exist to fix: **query rewriting**
-(expanding the question before searching) and **contextual retrieval** (giving each
-chunk a description of where it came from before embedding it). It's a real ceiling,
-and it isn't reached by swapping in a bigger model.
+BM25 has nothing to match on. The embedding does better, ranking it **8th out of 199**,
+so it sees the connection. But 8th is outside the top 5, and fusion and reranking can only
+reorder what retrieval already surfaced. Miss it there and every later stage inherits the
+miss. A bigger model would not fix it; the first two items in section 7 would.
 ''')
 
 md('''
----
-## 6. The chunk size knob
+### What the eval is actually for
 
-One parameter, no model changes. The theory says there's a sweet spot: small chunks
-are precise but lose the context that made them meaningful, while large chunks blur
-several topics into a single vector that sits near none of them.
+Catching a change that made things worse.
 
-Only half of that shows up here, which is worth seeing rather than being told.
-
-Note that BM25 has to be rebuilt too — document frequency and average document
-length are properties of the chunking, not of the corpus.
+Say you decide smaller chunks would be more precise, and drop the chunk size from 900
+characters to 200. That is a one-word edit, it runs without error, and every answer still
+looks plausible. The eval is the only thing that tells you what it cost.
 ''')
 
 code('''
-sizes = [200, 300, 450, 600, 900, 1500, 2500, 4000]
-dense_curve, hybrid_curve = [], []
+before = evaluate(hybrid)[0]
 
-for size in sizes:
-    chunks = build_chunks(max_chars=size, overlap=size // 6)
-    E = embed([c["text"] for c in chunks])
-    index_bm25(chunks)
-    dense_curve.append(evaluate(lambda q, k: top_k(dense_scores(q), k))[0])
-    hybrid_curve.append(evaluate(hybrid)[0])
-    print(f"max_chars={size:<5} chunks={len(chunks):<4} "
-          f"dense={dense_curve[-1]:.2f}  hybrid={hybrid_curve[-1]:.2f}")
+chunks = build_chunks(max_chars=200, overlap=30)     # the "improvement"
+E = embed([c["text"] for c in chunks])
+index_bm25(chunks)
+after = evaluate(hybrid)[0]
 
-# Put everything back to the 900-char setup the rest of the notebook assumes.
-chunks = build_chunks()
+chunks = build_chunks()                              # put it back
 E = embed([c["text"] for c in chunks])
 index_bm25(chunks)
 
-fig, ax = plt.subplots(figsize=(8.5, 5))
-ax.plot(sizes, hybrid_curve, marker="o", lw=2, color="#2a7", label="hybrid")
-ax.plot(sizes, dense_curve, marker="o", lw=2, color="#47c", label="dense only")
-ax.axhline(1.0, color="gray", ls=":", lw=1)
-ax.set_xscale("log"); ax.set_xticks(sizes)
-ax.set_xticklabels([str(s) for s in sizes])
-ax.set_xlabel("max chunk size (characters)"); ax.set_ylabel("recall@5")
-ax.set_ylim(0.6, 1.05)
-ax.set_title(f"Chunk size sweep ({len(queries)} questions, so one question = {1/len(queries):.2f})")
-ax.legend(); ax.grid(alpha=0.3)
-ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-plt.tight_layout(); plt.show()
+print(f"chunk size 900 -> recall@5 {before:.2f}")
+print(f"chunk size 200 -> recall@5 {after:.2f}")
+print(f"\\nverdict: {'REGRESSION' if after < before else 'fine'}, "
+      f"{(before-after)*len(queries):.0f} of {len(queries)} questions newly broken")
 ''')
 
 md('''
-**The small-chunk penalty is real and the large-chunk penalty is invisible.** Below
-about 450 characters both curves fall off hard — at 200 characters hybrid drops to
-0.72, because a 200-character window cuts sentences in half and strands facts from
-the heading that gave them meaning. Above 450 the curve is essentially flat all the
-way out to 4000.
+That is the argument for evals in one cell. The change was reasonable, the code ran, and
+it quietly broke several questions.
 
-That flat right-hand side is a property of *this corpus*, not a general law. These are
-markdown files with short sections, so even a 4000-character chunk is usually still
-one coherent topic — there is nothing to blur together. On long prose with no headings
-you would expect the right-hand side to fall too, and you would want to check rather
-than assume.
-
-**And be careful how hard you lean on any of it.** There are 18 questions, so one
-question is worth 0.06 recall and most of the wiggles here are one question wide.
-Knowing the resolution of your own evaluation is part of the job: an eval that cannot
-separate 0.89 from 0.94 also cannot referee a fine-grained argument about chunk size.
-It *can* tell you 200 is a bad idea, and that is genuinely useful.
+Two caveats. With 18 questions each one is worth 0.06 recall, so this eval can say "200 is
+a bad idea" but cannot referee 0.89 against 0.94. And it measures retrieval only, which is
+the half you can check without a language model.
 ''')
 
 md('''
 ---
-## 7. The generation half
+## 6. The generation half
 
-There is no API call in this notebook, so nothing here needs a key. That is partly
-convenience and partly the point: retrieval is where nearly all the engineering lives,
-and it is fully measurable without a language model in the loop. The G in RAG is one
-request with the retrieved text in the prompt.
+No API call here, so nothing needs a key. That is partly the point: retrieval is where
+the engineering lives, and it can be measured without a language model in the loop. The G
+in RAG is one request with the retrieved text in the prompt.
 ''')
 
 code('''
@@ -640,72 +863,47 @@ print(prompt)
 ''')
 
 md('''
-Three things in that prompt are doing real work, and each one has a failure it
-prevents:
+Three lines in that prompt each prevent a specific failure:
 
-1. **"using only the sources below"** — without it the model answers from pretraining
-   and you cannot tell retrieval failed.
-2. **"cite the source filename"** — makes every claim checkable, and citations that
-   don't match the retrieved text are the cheapest hallucination detector there is.
-3. **"say so instead of guessing"** — gives the model an exit. Retrieval will
-   sometimes return nothing useful, and a confident wrong answer is worse than "I
-   don't know."
+1. **"using only the sources below"** keeps the answer tied to what you retrieved.
+   Without it the model answers from pretraining, hiding retrieval failures.
+2. **"cite the source filename"** makes claims checkable. A citation that does not match
+   the retrieved text is a cheap signal something was invented.
+3. **"say so instead of guessing"** gives the model an exit, because a confident wrong
+   answer is worse than "I don't know."
 
-Sending it is `client.messages.create(model="claude-opus-5", ...)` with that string as
-the user message. Nothing in this notebook changes.
+Sending it is `client.messages.create(model="claude-opus-5", ...)` with that string as the
+user message.
 
-**The failure worth understanding:** good retrieval does not guarantee a good answer.
-The right chunk can be sitting in the prompt and the model still gets it wrong — which
-is why RAG evaluation has two halves. Retrieval metrics (measured above) and
-faithfulness, meaning *is every claim in the answer supported by the retrieved text*.
-The second is usually scored by a second model reading answer and sources together.
+**Worth knowing:** good retrieval does not guarantee a good answer. The right chunk can
+be in the prompt and the model still gets it wrong, which is why RAG eval has a second
+half, **faithfulness**: is every claim in the answer supported by the retrieved text?
+That one needs a second model to score, so it is named here rather than built.
 ''')
 
 md('''
 ---
-## 8. What I left out
+## 7. Four things worth knowing next
 
-Deliberately, to keep this readable. These are here as **vocabulary** — enough to
-recognize the terms and know what problem each one solves, not enough to implement
-them. Roughly in order of how much they'd change the numbers on a corpus like this:
+Named here so the terms are familiar when you meet them. The first two would move the
+numbers on this corpus most.
 
-- **Contextual retrieval** — prefix each chunk with a sentence describing where it
-  sits in its document before embedding it. Cheap, and it fixes the biggest weakness
-  in section 1: a chunk cut from the middle of a file loses the context that made it
-  make sense.
-- **Metadata filtering** — scoping the search to one repo. Section 4 showed a query
-  no retriever can resolve without it. Usually a bigger win than a better model.
-- **Query rewriting** — expanding or splitting the question before searching, so
-  "how do I run this" becomes something with content words in it.
-- **Matryoshka embeddings** — trained so the first 64 dimensions are usable on their
-  own, letting you cut memory ~6x for a small quality loss. Search cheap, rescore
-  exact.
-- **Late interaction (ColBERT)** — a vector per token instead of per chunk. Close to
+- **Contextual retrieval**: prefix each chunk with a sentence saying where it came from
+  before embedding it. Fixes the weakness in section 1, where a chunk cut from the middle
+  of a file loses the context that made it make sense.
+- **Metadata filtering**: scope the search to one repo. Section 4 had a question no
+  retriever can answer without it.
+- **Query rewriting**: expand the question before searching, so "how do I run this" gains
+  some content words.
+- **Late interaction (ColBERT)**: a vector per token instead of per chunk. Near
   cross-encoder quality at closer to bi-encoder speed.
-- **Multi-hop / agentic retrieval** — let the model search, read, and search again,
-  for questions no single query can answer.
 
 ---
-## If you remember five things
+## The short version
 
-1. **RAG is attention over a store that doesn't fit in the context window.** Score a
-   query against everything, keep the best few. Section 0.
-2. **Chunking decides more than the model does.** What you retrieve is a chunk, so
-   where you cut is where the answer either survives intact or gets split in half.
-3. **Semantic and keyword search fail differently, so run both.** Embeddings miss
-   exact tokens like `5433`; keywords miss paraphrases like "wipe the database" →
-   `make reset`. Fusing them fixed every question here that either one missed.
-4. **Retrieving and ranking are different jobs.** Fusion got the right passage into
-   the top 5; only the cross-encoder got it to the top. Both stages exist because
-   both problems exist.
-5. **Without labelled questions you are guessing.** Twenty minutes of labelling is
-   what separates "this feels better" from "recall went 0.78 → 0.94", and it is the
-   step people skip.
-
-**The honest summary:** almost none of the work is in the vector math. It is in
-cutting documents sensibly, keeping keyword search alongside semantic search,
-spending an afternoon writing labelled questions, and then having numbers to point at
-when someone proposes a change.
+Almost none of the work is in the vector math. It is in cutting documents sensibly,
+running keyword search alongside semantic search, and writing down 18 labelled questions
+so you have a number to point at when someone proposes a change.
 ''')
 
 nb = {
