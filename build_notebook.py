@@ -21,7 +21,8 @@ the obvious fix, and it fails as soon as the corpus outgrows the context window.
 
 **So: find the few paragraphs most likely to answer the question, and paste only those.**
 That finding step is retrieval, and it is where nearly all the engineering lives.
-Sections 0-5 are about *find*. Section 6 covers what happens after.
+Sections 0-5 are about *find*. Section 6 covers what happens after, and 7 and 8 are what
+you would hit next in a real system.
 
 ### Why this corpus
 
@@ -32,8 +33,9 @@ expensive part, which is why so many RAG demos stop before the evaluation.
 
 No framework, no vector database, no API keys. The embedding model and the reranker are
 ordinary library calls, since writing those yourself teaches nothing; everything between
-them is written out so you can read it. The last section maps each piece to what you would
-use in production. A refresher and exploration for me, shared along the way.
+them is written out so you can read it. Where a piece has an obvious production
+equivalent, an *In production* note says so on the spot. A refresher and exploration for
+me, shared along the way.
 
 ### Four words used throughout
 
@@ -52,6 +54,33 @@ recent part. Each wins on different questions.
 
 Assumed background is Python and numpy, specifically that `@` is a dot product. Softmax,
 attention and BM25 get built as they come up.
+
+### Refresher: where RAG sits in the ML landscape
+
+*Skip if you have this map already.*
+
+**Three ways a model learns.** *Supervised* learning trains on labelled examples: here is
+an email, here is whether it is spam. *Unsupervised* finds structure in unlabelled data,
+like the PCA in section 2 grouping chunks nobody told it about. *Reinforcement* learns
+from a reward signal rather than answers, which is how models learn to play games, and how
+the final polish on chat models is done.
+
+**Traditional ML versus deep learning.** Logistic regression, decision trees and gradient
+boosting learn from features you engineer by hand, and they still win on tabular data.
+Deep learning stacks many layers of learned transformations and works out its own
+features, which is what made text and images tractable. Transformers, from section 0, are
+deep learning.
+
+**Where the pieces here sit.** BM25 does not learn at all: it is arithmetic over word
+counts from the 1990s. The embedding model is deep learning, pretrained on a large corpus
+then tuned on sentence pairs. The cross-encoder in section 4 is supervised, trained on
+labelled query and document pairs.
+
+**And RAG itself is none of the above.** No training happens anywhere in this notebook. It
+is an architecture: search, then paste into a prompt. That is exactly why it caught on,
+because it gives a model access to your documents without the cost and risk of fine-tuning
+one. The rough rule is that fine-tuning teaches a model new *behaviour*, and retrieval
+gives it new *facts*. Most people reaching for the first actually want the second.
 ''')
 
 md('''
@@ -256,6 +285,9 @@ whatever is left at the end becomes its own chunk however short it is, and a 50-
 chunk is unlikely to be retrieved for anything. Real chunkers usually fold a runt like
 that back into the previous chunk.
 
+*In production:* `RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=150)` from
+LangChain does all of the above, including the runt handling.
+
 ---
 ## 2. Embedding
 
@@ -393,6 +425,10 @@ beat. It scores a chunk by the query words it literally contains, weighted by tw
 Plus two corrections. Term frequency **saturates**, so the 20th "postgres" adds almost
 nothing over the 3rd, and long chunks are **penalized** so they cannot win just by being
 big. `k1` and `b` below control those curves, at their standard defaults.
+
+*In production:* the `rank_bm25` package, or Postgres full-text search. Note that Postgres
+`ts_rank` is frequency-based rather than true BM25, and it is lexical only, with no
+embeddings involved.
 ''')
 
 code('''
@@ -441,6 +477,9 @@ Adding the two score arrays together fails, since one is a cosine in [0,1] and t
 an unbounded sum of logs. **Reciprocal rank fusion** (RRF on the charts) sidesteps that by
 discarding the scores and using only ranks: first place is first place whatever number
 produced it.
+
+*In production:* LangChain's `EnsembleRetriever`, which fuses any set of retrievers this
+same way.
 ''')
 
 code('''
@@ -691,6 +730,10 @@ it quietly broke several questions.
 Two caveats. With 18 questions each one is worth 0.06 recall, so this eval can say "200 is
 a bad idea" but cannot referee 0.89 against 0.94. And it measures retrieval only, which is
 the half you can check without a language model.
+
+*In production:* RAGAS is the usual package, and it scores the generation half too. That
+needs a language model to grade the answers, so it costs money per run, and a hand-rolled
+retrieval eval like this one stays free and stays honest.
 ''')
 
 md('''
@@ -759,29 +802,47 @@ numbers on this corpus most.
   cross-encoder quality at closer to bi-encoder speed.
 
 ---
-## What you would actually use
+## 8. Keeping the index fresh
 
-Nothing here is written the way you would ship it. Each piece was built to be read, and
-each has an ordinary production counterpart:
+One thing this notebook quietly dodges: the embeddings were computed once, and the moment
+anyone commits to one of those repos they are out of date.
 
-| built here | what you would reach for |
-|---|---|
-| `build_chunks` | LangChain's `RecursiveCharacterTextSplitter` |
-| `E @ q` | pgvector's `<=>`, or a dedicated vector database |
-| `bm25_scores` | the `rank_bm25` package, or Postgres full-text search |
-| `rrf` | LangChain's `EnsembleRetriever` |
-| `rerank` | the same `CrossEncoder`, which was a library call already |
-| `evaluate` | RAGAS, or keep your own, which needs no API key and stays honest |
+Re-embedding all 199 chunks takes seconds here. On a real corpus it is slow and, if you
+are paying per token to embed, expensive. So production systems re-embed only what
+changed, which needs each chunk to have a stable identity. Hashing the text works, and it
+handles the awkward case for free: edit one paragraph and the chunks around it shift, so
+their text changes and their hashes change with them.
+'''
+)
 
-The two hard parts, the embedding model and the cross-encoder, were imported from the
-start. What is hand-written is about 120 lines, and swapping any of it for the library
-version changes a line or two rather than the shape.
+code('''
+import hashlib
 
-That is the useful thing to notice. The engineering is in where you cut the documents,
-whether you run keyword search alongside semantic search, and whether you wrote down the
-labelled questions. None of it is in the storage.
+def chunk_id(c):
+    return hashlib.sha256(c["text"].encode()).hexdigest()[:12]
 
----
+index = {chunk_id(c): c for c in chunks}      # what is already embedded
+
+edited = build_chunks()                        # pretend one file just changed
+edited[7] = {**edited[7], "text": edited[7]["text"] + " A sentence someone just added."}
+
+fresh = [c for c in edited if chunk_id(c) not in index]
+gone  = set(index) - {chunk_id(c) for c in edited}
+
+print(f"{len(edited)} chunks, {len(fresh)} need embedding, {len(gone)} to delete")
+print(f"saved: {(1 - len(fresh)/len(edited)) * 100:.0f}% of the embedding work")
+''')
+
+md('''
+The rest of the machinery follows from that. A push triggers the job, changed chunks get
+embedded, deleted ones get removed from the index, and BM25 has to be rebuilt regardless,
+because document frequency and average length are corpus-wide statistics.
+
+The one that catches people: **changing the embedding model means re-embedding
+everything.** Vectors from two different models are not comparable, so there is no
+incremental path, and a half-migrated index returns nonsense rather than failing loudly.
+Worth storing the model name alongside the vectors so the mismatch is at least detectable.
+
 ## The short version
 
 Almost none of the work is in the vector math. It is in cutting documents sensibly,

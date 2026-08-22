@@ -30,6 +30,22 @@ Cells are defined by `md(...)` and `code(...)` calls in order, each holding a `'
 string. Cell sources therefore must not contain `'''`, and a literal `\n` inside a
 cell needs to be written `\\n` so it survives into the notebook.
 
+**That escaping breaks when editing through a shell heredoc**, because the escape gets
+eaten twice and a real newline lands inside a cell's string literal, which fails only at
+execute time with `SyntaxError: unterminated string literal`. Either edit
+`build_notebook.py` directly rather than through a script, or avoid needing `\n` in the
+cell at all. Cheap check before spending 90 seconds on an execute:
+
+```bash
+.venv/bin/python build_notebook.py >/dev/null && .venv/bin/python -c "
+import json
+nb = json.load(open('rag.ipynb'))
+for i, c in enumerate(nb['cells']):
+    if c['cell_type'] == 'code':
+        compile(''.join(c['source']), f'cell{i}', 'exec')
+print('all code cells compile')"
+```
+
 ## Constraints that are deliberate
 
 - **No API keys, ever.** Local models only. The notebook must run on a laptop with no
