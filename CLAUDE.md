@@ -118,6 +118,18 @@ reading rather than guessing.
 **Only add docs from repos already public on GitHub.** `django-fingerprint` was removed for
 this reason. `howgood-apply` is excluded as an application to a specific company.
 
+**The corpus files are dated snapshots, not live copies.** `seanhelvey__README.md` in
+particular tracks a profile README that changes often. Sync it deliberately and rarely
+rather than on every edit, and never sync without running `check.py` afterwards.
+
+**Run `.venv/bin/python check.py` after touching `corpus/` or `queries.json`.** Ten of the
+eighteen markers appear in exactly one file, so editing that string away makes the query
+score zero for every method and drags the results table down without any error. The script
+turns that silent failure into a loud one.
+
+Syncing the profile README on 2026-08-22 moved the chunk count from 199 to 201 and left
+every score identical, so a sync is cheap. It is the marker disappearing that is expensive.
+
 Two properties are load-bearing: the two search methods must fail on *different* questions
 (the entire argument for hybrid search), and `:5173` appearing in two separate projects
 gives a worked example of a question no retriever can answer without metadata filtering. It

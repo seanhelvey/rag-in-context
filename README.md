@@ -70,6 +70,7 @@ Run it from the repo root, since all paths are relative.
 | `figures.py` | matplotlib drawing, kept out of the notebook so cells stay about retrieval |
 | `corpus/` | 13 markdown files, ~12,000 words: READMEs and CLAUDE.md files from 8 public repos of mine |
 | `queries.json` | 18 hand-labelled questions, each with the exact string a correct passage must contain |
+| `check.py` | verifies every marker still appears in the corpus. Run it after changing either |
 
 ## Why this corpus
 
