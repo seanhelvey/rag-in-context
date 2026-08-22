@@ -187,7 +187,7 @@ def pipeline():
     row1 = [("corpus", "13 markdown files", 1.55, "#f2f2f2", "#ccc"),
             ("chunk", "section 2", 1.35, pale, GREEN),
             ("embed", "section 2", 1.35, pale, GREEN),
-            ("vectors", "199 x 384", 1.35, mid, GREEN)]
+            ("vectors", "one per chunk", 1.35, mid, GREEN)]
     x = 0.35
     for label, sub, w, face, edge in row1:
         box(x, TOP, w, label, sub, face, edge)

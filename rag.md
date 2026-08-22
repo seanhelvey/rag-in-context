@@ -15,9 +15,10 @@ jupyter:
 
 # RAG in context
 
-A refresher on retrieval-augmented generation, written to connect it to ideas that have
-been around a lot longer. RAG shows up in a great many job descriptions, and most of what
-makes it work turns out to be search, which is a well-worn subject.
+Getting a language model to answer questions from documents it was never trained on. The
+trick is search, and most of what makes it work predates the models, so this connects it
+back to ideas that have been around a lot longer. A refresher, filling in gaps along the
+way.
 
 Everything here runs on a laptop with no account and no API key. Two small models download
 once and then it works offline.
@@ -120,7 +121,7 @@ print(f"median length: {int(np.median([len(c['text']) for c in chunks]))} chars"
 LlamaIndex. Both do this and handle the short leftover piece at the end, which the version
 above does not.
 
-Now the part that is genuinely new. Classical text search represents a document as counts
+Now the part that is new. Classical text search represents a document as counts
 of the words in it, so the coordinates are words you chose. An **embedding** model produces
 the coordinates instead: a fixed-length list of numbers for any span of text, arranged so
 that text with similar meaning lands in a similar direction.
@@ -158,7 +159,7 @@ scaled to length 1, which matters for a practical reason. For unit vectors the d
 rather than a formula.
 
 Which means the geometry is the geometry you already know. Below, one chunk is the
-reference, and four others are drawn at the angle the model actually produced.
+reference, and four others are drawn at the angle the model produced.
 
 ```python
 ref = next(k for k, c in enumerate(chunks) if "No persistent volumes" in c["text"])
@@ -212,7 +213,7 @@ for rank, i in enumerate(top_k(dense_scores(demo), 3), 1):
     print(f"   {flat[:88]}...")
 ```
 
-*In production:* a vector database. `E @ q` is the whole comparison; a vector store adds
+*In production:* a vector database. `E @ q` is all the comparison there is; a vector store adds
 persistence, metadata filters, and an index that finds approximately the nearest vectors
 without scanning all of them, which starts to matter around a hundred million rows. If you
 have used **pgvector**, `ORDER BY embedding <=> $1` is doing this same cosine, with the
@@ -291,13 +292,13 @@ print()
 show("what port does local Postgres listen on?", "5433")
 ```
 
-They fail in opposite directions, and that is the whole argument for running both. The
+They fail in opposite directions, and that is the argument for running both. The
 first question needs `make reset`, which shares no words with "wipe" or "start over", so
 keyword search never sees it. The second needs the exact token `5433`, and keyword search
 goes straight to it while the embedding does not surface it at all.
 
 Rare exact tokens are the general case of the second one: error codes, customer IDs, part
-numbers, the things people actually search for at work.
+numbers, the things people search for at work.
 
 ## 4. Combining and reordering
 
@@ -449,10 +450,7 @@ questions each is worth 0.06 recall, so this can say "200 is a bad idea" but can
 0.89 against 0.94. And it measures retrieval only, which is the half you can check without
 a language model.
 
-*In production:* RAGAS, which scores the generated answer as well. That needs a language
-model to grade, so it costs money per run.
-
-## 6. The decisions that actually matter
+## 6. The decisions that matter
 
 Retrieval quality is mostly decided by things that are not models.
 
@@ -547,9 +545,9 @@ pretraining and hides retrieval failures. **"Cite the filename"** makes claims c
 is worse than "I don't know."
 
 Good retrieval does not guarantee a good answer. The right chunk can be in the prompt and
-the model still gets it wrong, which is why RAG evaluation has a second half called
+the model still gets it wrong. RAG evaluation has a second half for that, called
 **faithfulness**: is every claim in the answer supported by the retrieved text? Scoring
-that needs a second model, so it is named here rather than built.
+that needs a second model, so the tool for it, **RAGAS**, is named here rather than built.
 
 ## Where to go next
 
