@@ -15,74 +15,6 @@ def _clean(ax, sides=("top", "right")):
         ax.spines[s].set_visible(False)
 
 
-def softmax_steps(scores, labels, softmax):
-    """Raw score, after exp, after dividing, plus the same scores sharpened."""
-    x, bw = np.arange(len(labels)), 0.26
-    ex = np.exp(scores - scores.max())
-    nrm = ex / ex.sum()
-
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4))
-    a1.bar(x - bw, scores, bw, color=GREY, label="raw score")
-    a1.bar(x, ex, bw, color=BLUE, label="after exp")
-    a1.bar(x + bw, nrm, bw, color=GREEN, label="divided by total")
-    for i in range(len(labels)):
-        a1.text(i + bw, nrm[i] + .03, f"{nrm[i]:.2f}", ha="center", fontsize=8, color=GREEN)
-        if scores[i] == 0:                  # a zero bar has no height, so draw a stub
-            a1.plot([i - bw - .12, i - bw + .12], [0, 0], color=GREY, lw=2.5)
-            a1.text(i - bw, .05, "0", ha="center", fontsize=8, color=GREY)
-    a1.annotate("a score of 0 becomes 0.37,\nnot 0", xy=(2, ex[2]), xytext=(1.75, .72),
-                fontsize=8, color=BLUE, arrowprops=dict(arrowstyle="->", color=BLUE, lw=1))
-    a1.set_title("Softmax, one step at a time", fontsize=11)
-    a1.legend(fontsize=8, frameon=False, loc="upper right")
-    a1.set_ylim(0, 1.25); a1.set_ylabel("value", fontsize=9)
-
-    for mult, colour, mark in ((1, GREY, "o"), (4, BLUE, "s"), (20, GREEN, "^")):
-        a2.plot(x, softmax(scores * mult), marker=mark, color=colour, lw=2,
-                label=f"scores x{mult}")
-    a2.set_title("The same scores, sharpened", fontsize=11)
-    a2.set_ylim(-.05, 1.05); a2.set_ylabel("weight", fontsize=9)
-    a2.legend(fontsize=8, frameon=False)
-
-    for ax in (a1, a2):
-        ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9); _clean(ax)
-    plt.tight_layout(); plt.show()
-
-
-def attention_head(labels, scores, weights, V, answer):
-    """One attention head as five labelled columns: key, score, weight, value, product."""
-    fig, ax = plt.subplots(figsize=(11, 4.2))
-    cx = {"key": 0.6, "score": 2.5, "weight": 4.1, "val": 6.2, "contrib": 8.1}
-
-    for header, xx in (("key (K)", cx["key"]), ("score = K @ q", cx["score"]),
-                       ("weight = softmax", cx["weight"]), ("value (V)", cx["val"]),
-                       ("weight x value", cx["contrib"])):
-        ax.text(xx, 3.85, header, fontsize=9, fontweight="bold", color="#444")
-
-    for y, label, score, wt, v in zip([3, 2, 1, 0], labels, scores, weights, V):
-        ax.text(cx["key"], y, label, fontsize=9, va="center", color="#333")
-        ax.annotate("", xy=(cx["score"] - .25, y), xytext=(cx["key"] + 1.15, y),
-                    arrowprops=dict(arrowstyle="->", color="#ccc", lw=1))
-        ax.text(cx["score"], y, f"{score:.2f}", fontsize=9, va="center", color=BLUE)
-        ax.barh(y, wt * 1.7, left=cx["weight"], height=.34, color=GREEN, alpha=.85)
-        ax.text(cx["weight"] + .05 + wt * 1.7, y, f"{wt:.3f}", fontsize=8, va="center",
-                color=GREEN)
-        ax.text(cx["val"], y, f"[{v[0]:>5.1f}, {v[1]:>5.1f}]", fontsize=9, va="center",
-                family="monospace", color="#333")
-        part = wt * v                      # fade the rows that barely contribute
-        ax.text(cx["contrib"], y, f"[{part[0]:>5.2f}, {part[1]:>5.2f}]", fontsize=9,
-                va="center", family="monospace", color="#333",
-                alpha=.35 + .65 * min(1, wt * 1.7))
-
-    ax.plot([cx["contrib"] - .1, cx["contrib"] + 1.55], [-.55, -.55], color="#444", lw=1)
-    ax.text(cx["contrib"], -.95, f"sum  [{answer[0]:.2f}, {answer[1]:.2f}]", fontsize=10,
-            family="monospace", color=GREEN, fontweight="bold", va="center")
-    ax.text(cx["key"], -.95, "the blended output, mostly made of the rows that matched",
-            fontsize=9, color=GREEN, va="center")
-    ax.set_xlim(0, 10.2); ax.set_ylim(-1.4, 4.3); ax.axis("off")
-    ax.set_title("One attention head, column by column", fontsize=11, loc="left")
-    plt.tight_layout(); plt.show()
-
-
 def chunk_windows(sec_len=2300, max_chars=900, overlap=150):
     """A long section with the windows drawn underneath and the overlaps marked."""
     fig, ax = plt.subplots(figsize=(10, 3.6))
@@ -120,50 +52,35 @@ def chunk_windows(sec_len=2300, max_chars=900, overlap=150):
     plt.tight_layout(); plt.show()
 
 
-def embedding_space(E, chunks):
-    """Chunks flattened to 2D with PCA, coloured by source repo."""
-    from sklearn.decomposition import PCA
+def rank_movement(query, before, after, chunks, marker=None):
+    """How the cross-encoder reorders the candidates hybrid retrieval returned.
 
-    xy = PCA(n_components=2, random_state=0).fit_transform(E)
-    repos = sorted({c["repo"] for c in chunks})
-    cmap = plt.get_cmap("tab10")
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    for i, repo in enumerate(repos):
-        m = np.array([c["repo"] == repo for c in chunks])
-        ax.scatter(xy[m, 0], xy[m, 1], s=42, alpha=0.75, color=cmap(i % 10), label=repo)
-    ax.set_title("Chunks in embedding space (PCA to 2D), colored by source repo")
-    ax.set_xlabel("PC1"); ax.set_ylabel("PC2")
-    ax.legend(fontsize=8, loc="best")
-    plt.tight_layout(); plt.show()
-
-
-def similarity_matrix(names, S):
-    """Cosine similarity between a handful of hand-picked chunks."""
-    fig, ax = plt.subplots(figsize=(7.5, 6.2))
-    im = ax.imshow(S, cmap="viridis", vmin=0, vmax=1)
-    ax.set_xticks(range(len(names)))
-    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
-    ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=8)
-    for a in range(len(names)):
-        for b in range(len(names)):
-            ax.text(b, a, f"{S[a, b]:.2f}", ha="center", va="center", fontsize=7,
-                    color="white" if S[a, b] < 0.6 else "black")
-    ax.set_title("Cosine similarity between hand-picked chunks")
-    fig.colorbar(im, shrink=0.8); plt.tight_layout(); plt.show()
-
-
-def rank_movement(query, before, after, chunks):
-    """How the cross-encoder reorders the candidates hybrid retrieval returned."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    Labels carry the chunk index, because several chunks share a filename and would
+    otherwise be indistinguishable. If a marker is given, chunks containing it are the
+    correct answers and get highlighted, so a reorder can be judged rather than admired.
+    """
+    fig, ax = plt.subplots(figsize=(11, 6))
     for i, idx in enumerate(before):
         y0, y1 = i, after.index(idx)
-        moved_up = y1 < y0
-        ax.plot([0, 1], [y0, y1], marker="o", color=GREEN,
-                lw=2.0 if moved_up else 1.0, alpha=0.95 if moved_up else 0.4)
-        ax.text(-0.03, y0, chunks[idx]["file"][:32], ha="right", va="center", fontsize=8)
-        ax.text(1.03, y1, chunks[idx]["file"][:32], ha="left", va="center", fontsize=8)
-    ax.set_xlim(-0.75, 1.75); ax.invert_yaxis(); ax.set_xticks([0, 1])
+        hit = marker is not None and marker in chunks[idx]["text"]
+        up = y1 < y0
+        ax.plot([0, 1], [y0, y1], marker="o",
+                color=ORANGE if hit else GREEN,
+                lw=2.6 if hit else (1.8 if up else 1.0),
+                alpha=1.0 if hit else (0.85 if up else 0.32),
+                zorder=3 if hit else 2)
+        tag = f'{chunks[idx]["file"][:24]}#{idx}'
+        colour, weight = ("#8a6100", "bold") if hit else ("#444", "normal")
+        ax.text(-0.03, y0, f'{y0 + 1}.  {tag}', ha="right", va="center", fontsize=8,
+                color=colour, fontweight=weight)
+        ax.text(1.03, y1, f'{y1 + 1}.  {tag}', ha="left", va="center", fontsize=8,
+                color=colour, fontweight=weight)
+
+    if marker is not None:
+        ax.text(0.5, len(before) - 0.3,
+                f'orange: the chunk contains "{marker}", so it is a correct answer',
+                fontsize=8.5, color="#8a6100", ha="center")
+    ax.set_xlim(-0.85, 1.85); ax.invert_yaxis(); ax.set_xticks([0, 1])
     ax.set_xticklabels(["hybrid retrieval", "after cross-encoder rerank"])
     ax.set_yticks([]); ax.set_title(f'Rank movement: "{query}"')
     _clean(ax, ("top", "right", "left", "bottom"))
@@ -185,4 +102,135 @@ def retrieval_quality(results, n_queries):
     ax.set_xticks(x); ax.set_xticklabels(names); ax.set_ylim(0, 1.08)
     ax.set_title(f"Retrieval quality over {n_queries} hand-labelled questions")
     ax.legend(); _clean(ax)
+    plt.tight_layout(); plt.show()
+
+
+def cosine_fan(ref_label, labels, cosines, E):
+    """One chunk as a reference, others drawn at their true angle from it, plus the
+    spread of every pair in the corpus against random directions."""
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.8))
+
+    a1.add_patch(plt.matplotlib.patches.Wedge((0, 0), 1.6, 90, 118, color="#f6f6f6"))
+    a1.text(-1.42, 0.72, "past 90 degrees:\nnegative cosine", fontsize=7.5, color=GREY)
+    a1.annotate("", xy=(1.0, 0), xytext=(0, 0),
+                arrowprops=dict(arrowstyle="-|>", color=ORANGE, lw=3))
+    a1.text(1.04, 0, f"  {ref_label}\n  (measured from)", fontsize=8.5,
+            color=ORANGE, va="center", fontweight="bold")
+
+    order = np.argsort([np.arccos(np.clip(c, -1, 1)) for c in cosines])
+    level, prev = 0, None
+    for k in order:
+        label, cos = labels[k], cosines[k]
+        deg = np.degrees(np.arccos(np.clip(cos, -1, 1)))
+        level = level + 1 if prev is not None and deg - prev < 14 else 0
+        prev = deg
+        r = np.radians(deg)
+        x, y = np.cos(r), np.sin(r)
+        a1.annotate("", xy=(x, y), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle="-|>", color=GREEN, lw=2.2))
+        lr = 1.07 + 0.20 * level                # push clustered labels further out
+        a1.plot([x, x * lr], [y, y * lr], color="#cfe6dd", lw=.9, zorder=0)
+        a1.text(x * lr, y * lr, f" {label}\n cos {cos:+.2f}, {deg:.0f} deg",
+                fontsize=8, color="#1a6a55", va="center",
+                ha="left" if x > -0.1 else "right")
+
+    th = np.radians(np.linspace(0, 118, 200))
+    a1.plot(np.cos(th) * .99, np.sin(th) * .99, color="#e8e8e8", lw=1, zorder=0)
+    a1.plot([0, 0], [0, 1.62], color=GREY, lw=1.1, ls="--")
+    a1.set_xlim(-1.5, 1.85); a1.set_ylim(-0.2, 1.75)
+    a1.set_aspect("equal"); a1.axis("off")
+    a1.set_title("Chunks as arrows, at their real angles", fontsize=11, loc="left")
+
+    S = E @ E.T
+    real = S[np.triu_indices(len(E), k=1)]
+    rng = np.random.default_rng(0)
+    r = rng.normal(size=(4000, E.shape[1]))
+    r /= np.linalg.norm(r, axis=1, keepdims=True)
+    rand = (r[:2000] * r[2000:]).sum(1)
+
+    a2.hist(rand, bins=70, density=True, color=GREY, alpha=.75,
+            label=f"two random directions in {E.shape[1]}-d")
+    a2.hist(real, bins=70, density=True, color=GREEN, alpha=.75,
+            label="two actual chunks")
+    a2.axvline(float(real.mean()), color=GREEN, lw=1.2, ls="--")
+    a2.text(float(real.mean()) + .015, a2.get_ylim()[1] * .70,
+            f"chunk average {real.mean():.2f}", fontsize=8, color=GREEN)
+    a2.set_xlim(-.35, 1)
+    a2.set_xlabel("cosine similarity", fontsize=9); a2.set_yticks([])
+    a2.set_title("Every pair of chunks, against pure chance", fontsize=11, loc="left")
+    a2.legend(fontsize=8, frameon=False, loc="upper right")
+    _clean(a2, ("top", "right", "left"))
+    plt.tight_layout(); plt.show()
+
+
+def pipeline():
+    """The whole notebook on one screen: what runs once, and what runs per question."""
+    from matplotlib.patches import FancyBboxPatch
+
+    fig, ax = plt.subplots(figsize=(11.5, 4.4))
+    TOP, BOT, H = 2.55, 0.75, 0.60
+
+    def box(x, y, w, label, sub, face, edge, bold=True):
+        ax.add_patch(FancyBboxPatch((x, y), w, H, boxstyle="round,pad=0.015",
+                                    facecolor=face, edgecolor=edge, lw=1.4))
+        ax.text(x + w / 2, y + (0.38 if sub else 0.30), label, ha="center", va="center",
+                fontsize=9, color="#222", fontweight="bold" if bold else "normal")
+        if sub:
+            ax.text(x + w / 2, y + 0.16, sub, ha="center", va="center", fontsize=7.5,
+                    color="#777")
+
+    def arrow(x0, y, x1):
+        ax.annotate("", xy=(x1, y + H / 2), xytext=(x0, y + H / 2),
+                    arrowprops=dict(arrowstyle="-|>", color="#c4c4c4", lw=1.5))
+
+    pale, mid = "#eef6f2", "#dceee6"
+    row1 = [("corpus", "13 markdown files", 1.55, "#f2f2f2", "#ccc"),
+            ("chunk", "section 2", 1.35, pale, GREEN),
+            ("embed", "section 2", 1.35, pale, GREEN),
+            ("vectors", "199 x 384", 1.35, mid, GREEN)]
+    x = 0.35
+    for label, sub, w, face, edge in row1:
+        box(x, TOP, w, label, sub, face, edge)
+        if x > 0.35:
+            arrow(x - 0.32, TOP, x - 0.04)
+        x += w + 0.32
+    e_centre = x - row1[-1][2] - 0.32 + row1[-1][2] / 2
+
+    row2 = [("question", None, 1.35, "#f2f2f2", "#ccc"),
+            ("keyword + meaning", "section 3", 2.05, pale, ORANGE),
+            ("fuse", "section 4", 1.15, pale, ORANGE),
+            ("rerank", "section 4", 1.25, pale, ORANGE),
+            ("prompt", "section 7", 1.35, pale, GREEN),
+            ("answer", None, 1.35, "#f2f2f2", "#ccc")]
+    x, spans = 0.35, []
+    for label, sub, w, face, edge in row2:
+        box(x, BOT, w, label, sub, face, edge)
+        spans.append((x, x + w))
+        if x > 0.35:
+            arrow(x - 0.30, BOT, x - 0.04)
+        x += w + 0.30
+
+    # Route the E-to-search connector through the empty band between the rows, so it
+    # does not graze the tops of the boxes it passes over.
+    search_centre = sum(spans[1]) / 2
+    band = (TOP + BOT + H) / 2
+    ax.plot([e_centre, e_centre, search_centre], [TOP - 0.02, band, band],
+            color=GREEN, lw=1.5, ls="--")
+    ax.annotate("", xy=(search_centre, BOT + H + 0.02), xytext=(search_centre, band),
+                arrowprops=dict(arrowstyle="-|>", color=GREEN, lw=1.5, ls="--"))
+    ax.text(search_centre + 0.12, band + 0.14, "searched, never rebuilt per question",
+            fontsize=7.5, color=GREEN, va="center")
+
+    ax.text(0.35, TOP + H + 0.30, "ONCE, whenever the documents change",
+            fontsize=9, color="#555", fontweight="bold")
+    ax.text(0.35, BOT + H + 0.30, "EVERY question", fontsize=9, color="#555",
+            fontweight="bold")
+
+    lo, hi = spans[1][0], spans[3][1]
+    ax.plot([lo, lo, hi, hi], [BOT - 0.16, BOT - 0.28, BOT - 0.28, BOT - 0.16],
+            color=ORANGE, lw=1.4)
+    ax.text((lo + hi) / 2, BOT - 0.52, "retrieval: nearly all the engineering, "
+            "and what section 5 measures", fontsize=8.5, color="#8a6100", ha="center")
+
+    ax.set_xlim(0, 11.2); ax.set_ylim(0, 3.75); ax.axis("off")
     plt.tight_layout(); plt.show()

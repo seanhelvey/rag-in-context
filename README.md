@@ -1,54 +1,47 @@
-# RAG from scratch
+# RAG in context
 
-**The problem:** somewhere in a company wiki, a support archive, or a codebase nobody has
-read end to end, there is a paragraph that answers your question. Keyword search makes you
-guess the author's words, so `grep "wipe the database"` misses the file that says
-`make reset`. And a language model has never seen those documents.
+A refresher on **retrieval-augmented generation**, written to connect it to ideas that
+have been around a lot longer. RAG appears in a great many job descriptions, and most of
+what makes it work turns out to be search, which is a well-worn subject.
 
-A single notebook that builds **retrieval-augmented generation** up from numpy, one piece
-at a time, on 13 markdown files of real project documentation.
+One notebook, about a twenty minute read. Everything runs on a laptop with no account and
+no API key. Two small models download once (~170 MB) and after that it works offline, in
+about a minute.
 
-No framework, no vector database, no API keys. The embedding model and the reranker are
-ordinary `sentence-transformers` calls, since writing those yourself teaches nothing;
-everything between them is written out so you can read it, and the last section maps each
-piece to what you would use in production. Two small models download once (~170 MB);
-everything after that runs offline on a laptop CPU in about a minute.
+It is written to be *read* as much as run. Outputs and figures are committed, so it makes
+sense start to finish without executing a cell.
 
-It is written to be *read*, not just run. The outputs and figures are committed, so it
-makes sense start to finish without executing a cell.
+## What it covers
 
-## What RAG is, in one paragraph
-
-A language model can't see your documents. RAG is the workaround: when someone asks a
-question, search your documents for the handful of paragraphs most likely to contain the
-answer, paste those into the prompt, and ask the question with that context attached. The
-"generation" half is one ordinary API call. Essentially all of the engineering is in the
-search, which is why this notebook spends six sections there and one on the prompt.
-
-**Assumed background:** Python and numpy, specifically that `@` does a dot product.
-Softmax, attention and BM25 are built as they come up.
-
-A refresher and an exploration, filling in gaps as I go. If you are somewhere similar,
-it should work for you too: sections that re-derive a fundamental are headed
-**Refresher** and open with a line telling you to skip if it's already fresh, so the
-notebook reads either way.
-
-## The vocabulary
-
-Enough to read the notebook. Each is introduced again in context.
-
-| term | meaning |
+| | |
 |---|---|
-| **corpus** | the pile of documents being searched. Here, 13 markdown files |
-| **chunk** | one searchable piece of a document. Retrieval returns chunks, not files |
-| **embedding** | a list of numbers a neural net produces for text, arranged so similar *meaning* lands on similar numbers |
-| **cosine similarity** | how close two embeddings point in the same direction; the standard way to compare them |
-| **dense retrieval** | search by embedding similarity. Matches meaning, misses exact tokens |
-| **BM25** | classic keyword search. Matches exact words, misses paraphrases |
-| **hybrid search** | running both and merging the two ranked lists |
-| **reranking** | a slower, more accurate model re-ordering the top candidates |
-| **recall@5** | did the right passage land in the top 5? |
-| **MRR** | mean reciprocal rank. How *high* did the first correct hit land? |
+| **The problem** | why a language model cannot answer from your documents, and what to do about it |
+| **1. Where this sits** | RAG involves no training. Where its pieces land against supervised, unsupervised, traditional and deep learning |
+| **2. From text to vectors** | documents into chunks, chunks into embeddings, and why cosine similarity is the idea you already know with the coordinates learned rather than chosen |
+| **3. Two ways to search** | by meaning and by keyword, shown failing on different questions |
+| **4. Combining and reordering** | fusing two ranked lists, then a slower model fixing the order |
+| **5. Does any of it work?** | 18 labelled questions, the scores, and the eval catching a plausible change that quietly breaks things |
+| **6. The decisions that matter** | where you cut, questions with no single answer, and keeping embeddings fresh |
+| **7. The generation half** | assembling the prompt, and what each instruction prevents |
+
+Where a piece has an obvious production counterpart, an *In production* note names it on
+the spot: LangChain, pgvector, `rank_bm25`, Cohere Rerank, RAGAS and the rest.
+
+## Results
+
+| method | recall@5 | MRR |
+|---|---|---|
+| by meaning (embeddings) | 0.78 | 0.69 |
+| by keyword (BM25) | 0.78 | 0.62 |
+| both, fused | 0.89 | 0.65 |
+| fused + rerank | **0.94** | **0.85** |
+
+The two search methods tie, and fail on *different* questions. Embeddings cannot retrieve
+the exact token `5433`; keyword search cannot get from "wipe my local database" to
+`make reset`. Fusing them fixes recall, and only the reranker fixes the order.
+
+One question defeats all four, and section 5 works through why. The ceiling is more
+instructive than the score.
 
 ## Run it
 
@@ -57,47 +50,26 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/jupyter lab rag.ipynb
 ```
 
-## What's here
+Run it from the repo root, since all paths are relative.
+
+## How it is built
+
+`rag.md` is the source and `rag.ipynb` is generated from it. The two are paired with
+[jupytext](https://jupytext.readthedocs.io/), so editing either updates the other:
+
+```sh
+.venv/bin/jupytext --sync rag.md                   # after editing either file
+.venv/bin/jupyter nbconvert --to notebook --execute --inplace \
+    --ExecutePreprocessor.timeout=1800 rag.ipynb   # refresh the committed outputs
+```
 
 | | |
 |---|---|
-| `rag.ipynb` | the notebook, read this |
-| `build_notebook.py` | generates `rag.ipynb`; edit here and re-run, never the JSON |
-| `figures.py` | matplotlib drawing, kept out of the notebook so cells stay short |
-| `corpus/` | 13 markdown files, ~13,000 words, from my own repos |
+| `rag.md` | the source. Plain markdown, code in fences. Edit this |
+| `rag.ipynb` | generated, with outputs committed |
+| `figures.py` | matplotlib drawing, kept out of the notebook so cells stay about retrieval |
+| `corpus/` | 13 markdown files, ~12,000 words: READMEs and CLAUDE.md files from 8 public repos of mine |
 | `queries.json` | 18 hand-labelled questions, each with the exact string a correct passage must contain |
-
-## The arc
-
-0. **Scoring with vectors**: dot products, softmax, query/key/value, built from numpy
-   alone. Ends by explaining what attention is, having just built one.
-1. **Chunking**: split on headings, then window. The least glamorous decision and usually
-   the one that decides whether any of it works.
-2. **Embedding**: what 199 chunks look like in vector space, and why a raw similarity
-   score means less than people assume.
-3. **Three ways to search**: dense (`E @ q`, one line), BM25 from scratch, and reciprocal
-   rank fusion over both.
-4. **Reranking**: bi-encoder vs cross-encoder, and the cheap-then-expensive cascade.
-5. **Evaluation**: label 18 questions, count how often each method finds the answer, then
-   watch the eval catch a plausible change that quietly breaks things.
-6. **The generation half**: assembling the prompt, and what each instruction prevents.
-7. **What's next**: contextual retrieval, metadata filtering, query rewriting, ColBERT.
-
-## Results
-
-| method | recall@5 | MRR |
-|---|---|---|
-| dense only | 0.78 | 0.69 |
-| BM25 only | 0.78 | 0.62 |
-| hybrid (RRF) | 0.89 | 0.65 |
-| hybrid + cross-encoder rerank | **0.94** | **0.85** |
-
-Dense and BM25 tie, and fail on *different* questions. Dense can't retrieve the exact
-token `5433`; BM25 can't get from "wipe my local database" to `make reset`. Fusing
-them fixes recall. Only the cross-encoder fixes ranking.
-
-One question defeats all four methods, and section 5 works through why. The ceiling is
-more instructive than the score.
 
 ## Why this corpus
 
@@ -106,7 +78,11 @@ case. Evaluating retrieval means knowing whether a result is *right*, and on an 
 corpus that is the expensive part, which is why so many RAG demos stop before the
 evaluation.
 
-It also has a property I didn't plan: three of these repos run a dev server on port 5173,
-so "start the frontend dev server" is unanswerable without knowing which project you
-meant. It's a worked example of a question no retriever can fix, only metadata filtering
-can.
+It also has a property I didn't plan: two of these projects run a dev server on port 5173,
+so "start the frontend dev server" is unanswerable without knowing which one you meant. It
+is a worked example of a question no retriever can fix, only metadata filtering can.
+
+## A note on how it was made
+
+Yes, I got help from Claude building this. Agents can be useful not just for coding but
+for creating and sharing materials that help people understand key concepts.

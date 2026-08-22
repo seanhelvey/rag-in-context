@@ -1,5 +1,5 @@
 numpy
 matplotlib
-scikit-learn
 sentence-transformers
 jupyter
+jupytext

@@ -37,7 +37,7 @@
  {
   "q": "start the frontend dev server with hot reload",
   "marker": "5173",
-  "note": "AMBIGUOUS ON PURPOSE: three separate repos run Vite on 5173"
+  "note": "AMBIGUOUS ON PURPOSE: two separate projects run Vite on 5173"
  },
  {
   "q": "what is the mullet stack?",
