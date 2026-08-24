@@ -26,7 +26,7 @@ once and then it works offline.
 ## The problem
 
 Somewhere in a company wiki, a support archive, or a codebase nobody has read end to end is
-the paragraph answering your question. Two things are in the way.
+the paragraph answering your question. Two things stand in the way.
 
 **Keyword search makes you guess the author's words.** Search "wipe the database" and miss
 the file that says `make reset`.
@@ -45,8 +45,8 @@ import figures
 figures.pipeline()
 ```
 
-Two loops: the top row runs once, whenever the documents change, the bottom row for every
-question asked.
+Two loops: the top row runs once whenever the documents change, the bottom row for every
+question.
 
 *In production:* you would call a framework instead. This is LlamaIndex, from its starter
 guide, and it is the whole pipeline:
@@ -71,8 +71,7 @@ each section imports one small library, or none, and shows what it did.
 
 The strip under each heading is that diagram again, same names and phases. Orange is whatever
 the section is about: a lit box, a bracket over the boxes some choice acts on, or a loop for
-the scoring cycle. Green dashed is always the vectors, computed once and searched every
-time.
+the scoring cycle. Green dashed is the vectors, computed once and searched every time.
 
 ## 1. Where this sits in the ML you already know
 
@@ -86,8 +85,8 @@ arithmetic over word counts, and the version here dates to the 1990s. The embedd
 deep learning, pretrained then tuned on sentence pairs. The reranker in section 6 is ordinary
 supervised learning, trained on labelled query and document pairs.
 
-**And the core operation is one you have already used.** Represent things as vectors, compare
-them with a cosine. That is decades old, and what changed is where the numbers come from.
+**And the core operation is one you have used.** Represent things as vectors, compare them
+with a cosine. Decades old, and what changed is where the numbers come from.
 
 ## 2. Cutting documents into chunks
 
@@ -303,9 +302,9 @@ Now the reason to care about both. Below, a star marks any chunk containing the 
 correct answer has to have.
 
 ```python
-def compare(query, marker, k=5):
+def compare(query, must_contain, k=5):
     cols = [best(search_by_meaning(query), k), best(search_by_keyword(query), k)]
-    tag = lambda i: f"{'*' if marker in chunks[i]['text'] else ' '} {chunks[i]['file'][:24]}#{i}"
+    tag = lambda i: f"{'*' if must_contain in chunks[i]['text'] else ' '} {chunks[i]['file'][:24]}#{i}"
     print(f"{query}\n{'':3}{'by meaning (dense)':<34}{'by keyword (sparse, BM25)':<34}")
     for r in range(k):
         print(f"{r+1:<3}" + "".join(tag(c[r]).ljust(34) for c in cols))
@@ -423,13 +422,13 @@ good at dragging the right chunk into the top few and bad at knowing which of th
 Fixing the order needs a different kind of model.
 
 Everything so far compares vectors computed separately, the chunks long before the question
-arrived. That is what makes search fast, and it means a chunk's vector cannot depend on what
-was asked. A **cross-encoder** puts the question and one chunk through the model together, so
-it weighs them against each other directly. Much more accurate, far too slow for every
-chunk.
+arrived. That is what makes search fast, and means a chunk's vector cannot depend on what was
+asked. A **cross-encoder** puts the question and one chunk through the model together, so it
+weighs them against each other directly. Much more accurate, far too slow for every chunk.
 
 Hence the usual arrangement: retrieve 25 candidates cheaply, rescore those carefully, keep
-the best few. The reranker loads from `sentence-transformers` too.
+the best few. That rescoring model is the **reranker**, the box of that name in the diagram,
+and it loads from `sentence-transformers` too.
 
 ```python
 from sentence_transformers import CrossEncoder
@@ -509,8 +508,8 @@ figures.chunk_windows(sec_len=1100, max_chars=400, overlap=80)
 
 **Questions with no single answer.** Two unrelated projects here run a dev server on port
 5173, so "start the frontend dev server" has several correct answers and no way to choose.
-No reranker fixes that. Metadata filtering does: scope the search to one project, which is a
-`WHERE` clause rather than a better model.
+No reranker fixes that. Metadata filtering does: scope the search to one project, a `WHERE`
+clause rather than a better model.
 
 **Staleness.** The embeddings were computed once, and the moment anyone edits a document they
 are out of date. Re-embedding everything is fast here and expensive on a real corpus, so
@@ -574,7 +573,8 @@ print(f"[{len(build_prompt())} characters. Below, the sources are cut short.]\n"
 print(build_prompt(trim=140))
 ```
 
-*In production:* one `client.messages.create` call with that string as the user message.
+*In production:* one request with that string as the user message, `client.messages.create`
+in Anthropic's SDK.
 
 Each of those three instructions prevents a specific failure. **"Using only the sources"**
 keeps the answer tied to what you retrieved, since otherwise the model answers from
@@ -591,14 +591,13 @@ that needs a second model, so the tool for it, **RAGAS**, is named here rather t
 
 Five terms worth recognising, roughly in order of how much they would move the numbers here.
 
-- **Contextual retrieval**: prefix each chunk with a sentence saying where it came from
-  before embedding it, which fixes the chunk cut from the middle of a file that no longer
-  makes sense alone.
+- **Contextual retrieval**: prefix each chunk with a sentence saying where it came from before
+  embedding it, which rescues the chunk cut from mid-file that no longer stands alone.
 - **Metadata filtering**: the `WHERE` clause from section 7.
 - **Query rewriting**: expand the question before searching, so "how do I run this" gains
-  some content words.
-- **Late interaction (ColBERT)**: a vector per token rather than per chunk. Close to
-  cross-encoder quality at closer to embedding speed.
+  content words.
+- **Late interaction (ColBERT)**: a vector per token rather than per chunk, close to
+  cross-encoder quality at nearer embedding speed.
 - **Agentic retrieval**: hand the search to the model as a tool, let it read what came back
   and search again. This is where both frameworks now start, and it changes who decides when
   to stop rather than any of the machinery above. The retrieval inside the loop is this one.
@@ -608,9 +607,9 @@ often run a LlamaIndex retriever as a tool inside a LangChain loop. Either would
 of this notebook, which is the point of having read it first.
 
 One last connection. **Attention**, the operation at the heart of a transformer, is also a
-search: every word scores itself against every other and holds a blend of whatever was
-relevant. RAG is the same shape over a store too large for the context window, with a hard
-cut instead of a blend. Keep the top few, drop the rest.
+search: every word scores itself against every other and holds a blend of what was relevant.
+RAG is the same shape over a store too large for the context window, with a hard cut instead
+of a blend. Keep the top few, drop the rest.
 
 ## The short version
 
