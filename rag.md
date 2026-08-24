@@ -26,14 +26,14 @@ once and then it works offline.
 ## The problem
 
 Somewhere in a company wiki, a support archive, or a codebase nobody has read end to end is
-the paragraph answering your question. Two things stand in the way.
+the paragraph answering your question. Two things are in the way.
 
 **Keyword search makes you guess the author's words.** Search "wipe the database" and miss
 the file that says `make reset`.
 
-**A language model has never seen those documents.** Pasting them all into the prompt is the
-obvious fix, and it stops working once they outgrow the **context window**, the fixed budget
-of text a model can be given at once.
+**A language model has never seen those documents.** Pasting them all in is the obvious fix,
+and it stops working once they outgrow the **context window**, the fixed budget of text a
+model can be given at once.
 
 So: find the few paragraphs most likely to answer the question, and paste only those. That is
 **retrieval-augmented generation**, and the finding step is the R, where nearly all the
@@ -60,32 +60,40 @@ answer    = index.as_query_engine().query(question)      # retrieves, ranks, pro
 ```
 
 LlamaIndex because it leads on ingestion and retrieval and gets there in three lines.
-LangChain leads on chaining and agents, and section 2 borrows its splitter. Mixing them is
-normal.
+LangChain leads on chaining and agents, and section 2 borrows its splitter.
 
 The last two lines are this whole notebook. **Sections 2 to 7 are the R, and section 8 alone
 is the G**: retrieval is where the engineering is, generation is one prompt. Every box holds
 a decision the framework makes for you, and sections 5 and 7 measure those. Nothing below
-runs a framework: each section imports one small library, or none, and shows what it did.
+runs a framework: each section imports one small library, or none.
 
 The strip under each heading is that diagram again. Orange marks whatever the section is
 about; green dashed is always the vectors.
 
 ## 1. Where this sits in the ML you already know
 
-**RAG involves no training.** It is an architecture: search, then paste into a prompt. That
-is why it caught on, since it gives a model your documents without the cost and risk of
-fine-tuning. The rough rule is that fine-tuning teaches new *behaviour* and retrieval gives
-new *facts*. Plenty of people reaching for the first want the second.
+**Three ways a model learns.** *Supervised* trains on labelled examples: here is an email,
+here is whether it is spam. *Unsupervised* finds structure nobody labelled, as PCA and
+k-means do. *Reinforcement* learns from a reward rather than an answer, which is how the last
+polish on a chat model is done.
 
-**The pieces sit in familiar categories.** Keyword search does not learn at all; it is
-arithmetic over word counts, and the version here dates to the 1990s. Both models do learn,
-and both are six-layer BERTs pretrained without labels then fine-tuned on pairs. The
-embedding model learned which sentences mean the same thing, the reranker which documents
-answer a query.
+**Traditional ML against deep learning.** Logistic regression, decision trees and gradient
+boosting learn from features you engineer, and still win on tabular data. Deep learning
+stacks learned transformations and finds its own features, which is what made text
+tractable.
 
-**And the core operation is one you have used.** Represent things as vectors, compare them
-with a cosine. Decades old, and what changed is where the numbers come from.
+**RAG is none of the above.** No training happens here at all. It is an architecture: search,
+then paste into a prompt, which gives a model your documents without the cost and risk of
+fine-tuning. Fine-tuning teaches new *behaviour*, retrieval gives new *facts*, and plenty of
+people reaching for the first want the second.
+
+**Where the pieces here sit.** Keyword search does not learn at all: arithmetic over word
+counts, from the 1990s. Both models do, and both are six-layer BERTs pretrained without
+labels then fine-tuned on pairs. The embedding model learned which sentences mean the same
+thing, the reranker which documents answer a query.
+
+**The core operation is one you have used.** Represent things as vectors, compare with a
+cosine. Decades old; what changed is where the numbers come from.
 
 ## 2. Cutting documents into chunks
 
@@ -242,11 +250,9 @@ for rank, i in enumerate(best(scores, 3), 1):
     print(f"   {flat[:88]}...")
 ```
 
-*In production:* a vector database. `E @ q` is all the comparison there is; a store adds
-persistence, metadata filters, and an index that finds approximately the nearest vectors
-without scanning all of them, which starts to matter in the low millions, on memory before
-latency. If you have used **pgvector**, `ORDER BY embedding <=> $1` is this same cosine, with
-the vectors beside your relational data so scoping a search is a `WHERE` clause.
+*In production:* a vector database, which adds persistence, metadata filters, and an index
+that finds approximately the nearest vectors instead of scanning every one, needed from the
+low millions up. If you have used **pgvector**, `ORDER BY embedding <=> $1` is this cosine.
 
 The other way to search is by keyword, and the standard is **BM25**. It scores a chunk by
 the query words it literally contains, weighted by two ideas. **Term frequency**: a chunk
@@ -361,8 +367,8 @@ for name, (r, m) in results.items():
 **MRR** adds *how high*: 1 if the right chunk came first, 1/2 if second, 1/3 if third, 0 if
 it never appeared, averaged over the questions.
 
-Neither method is strictly better. Keyword search finds more answers, 0.89 against 0.78, and
-ranks them worse, 0.52 against 0.61. More usefully, they miss different questions.
+Neither is strictly better. Keyword search finds more answers, 0.89 against 0.78, and ranks
+them worse, 0.52 against 0.61. More usefully, they miss different questions.
 
 ```python
 for item in queries:
@@ -501,7 +507,7 @@ print(f"verdict: {'REGRESSION' if after < before else 'fine'}, "
       f"{(before-after)*len(queries):.0f} of {len(queries)} questions newly broken")
 ```
 
-That is the argument for evals in one cell. Three caveats: with 18 questions each is worth
+That is the argument for evals in one cell. Three caveats. With 18 questions each is worth
 0.06 recall, so this can say "150 is a bad idea" but cannot separate 0.89 from 0.94. A marker
 is a substring, so a chunk that merely mentions `EXIF` counts as a hit whether or not it
 answers. And it measures retrieval only, the half you can check without a language model.
@@ -509,12 +515,12 @@ answers. And it measures retrieval only, the half you can check without a langua
 **Questions with no single answer.** Two unrelated projects here run a dev server on port
 5173, so "start the frontend dev server" has several correct answers and no way to choose.
 No reranker fixes that. Metadata filtering does: scope the search to one project, a `WHERE`
-clause rather than a better model.
+clause, not a better model.
 
-**Staleness.** The embeddings were computed once, and the moment anyone edits a document they
-are out of date. Re-embedding everything is fast here and expensive on a real corpus, so
-production systems re-embed only what changed. Each chunk needs a stable identity for that,
-and hashing its text works.
+**Staleness.** The embeddings were computed once and go out of date the moment anyone edits a
+document. Re-embedding everything is fast here and expensive on a real corpus, so production
+systems re-embed only what changed. That needs each chunk to have a stable identity, and
+hashing its text works.
 
 ```python
 import hashlib
@@ -534,11 +540,11 @@ print(f"{len(edited)} chunks, {len(fresh)} need embedding, {len(gone)} to delete
 print(f"{len(edited) - len(fresh)} of {len(edited)} embeddings reused")
 ```
 
-One chunk changed, so one needs embedding and its old copy is dropped. A real edit shifts
-the chunks after it too, and their hashes move with their text: identity comes from content,
-not position. Keyword search is rebuilt regardless, since document frequency is corpus-wide.
+One chunk changed, so one needs embedding and its old copy is dropped. A real edit shifts the
+chunks after it too, and their hashes move with their text: identity comes from content, not
+position. Keyword search is rebuilt regardless, since document frequency is corpus-wide.
 
-The one that catches people: **changing the embedding model means re-embedding everything.**
+The one that catches people: **a new embedding model means re-embedding everything.**
 Vectors from two models are not comparable, so there is no incremental path. A
 half-migrated index returns nonsense rather than failing loudly, so store the model name
 beside the vectors and the mismatch is at least detectable.
@@ -588,18 +594,16 @@ that needs a second model, so the tool for it, **RAGAS**, is named here rather t
 
 ## Where to go next
 
-Five terms worth recognising, roughly in order of how much they would move the numbers here.
+Four terms worth recognising, roughly by how much they would move the numbers here.
 
-- **Contextual retrieval**: prefix each chunk with a sentence saying where it came from before
-  embedding it, which rescues the chunk cut from mid-file that no longer stands alone.
+- **Contextual retrieval**: prefix each chunk with where it came from before embedding it,
+  which rescues the chunk cut from mid-file that no longer stands alone.
 - **Metadata filtering**: the `WHERE` clause from section 7.
-- **Query rewriting**: expand the question before searching, so "how do I run this" gains
-  content words.
 - **Late interaction (ColBERT)**: a vector per token rather than per chunk, close to
   cross-encoder quality at nearer embedding speed.
-- **Agentic retrieval**: hand the search to the model as a tool, let it read what came back
-  and search again. This is where both frameworks now start, and it changes who decides when
-  to stop rather than any of the machinery above. The retrieval inside the loop is this one.
+- **Agentic retrieval**: hand the search to the model as a tool and let it read what came
+  back and search again. Where both frameworks now start. It changes who decides when to
+  stop, not the machinery above: the retrieval inside that loop is this one.
 
 **LangChain and LlamaIndex** would each replace most of this notebook, and production teams
 often run a LlamaIndex retriever as a tool inside a LangChain loop.

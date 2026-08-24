@@ -55,7 +55,7 @@ fixes it. A metadata filter does. The ceiling is more instructive than the score
 | | |
 |---|---|
 | **The problem** | why a language model cannot answer from your documents, and what to do about it |
-| **1. Where this sits** | RAG involves no training. Where its pieces land against supervised, unsupervised, traditional and deep learning |
+| **1. Where this sits** | supervised, unsupervised and reinforcement; traditional ML against deep learning; and where RAG lands, which is none of them |
 | **2. Cutting documents into chunks** | why retrieval returns passages rather than files, and what the overlap is for, shown at a real seam |
 | **3. Text as vectors** | what an embedding is and is not, why each row is one chunk, and why cosine similarity is the idea you already know with the coordinates learned rather than chosen |
 | **4. Two ways to search** | by meaning and by keyword, shown failing on different questions |
