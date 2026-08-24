@@ -79,9 +79,10 @@ fine-tuning. The rough rule is that fine-tuning teaches new *behaviour* and retr
 new *facts*. Plenty of people reaching for the first want the second.
 
 **The pieces sit in familiar categories.** Keyword search does not learn at all; it is
-arithmetic over word counts, and the version here dates to the 1990s. The embedding model is
-deep learning, pretrained then tuned on sentence pairs. The reranker in section 6 is ordinary
-supervised learning, trained on labelled query and document pairs.
+arithmetic over word counts, and the version here dates to the 1990s. Both models do learn,
+and both are six-layer BERTs pretrained without labels then fine-tuned on pairs. The
+embedding model learned which sentences mean the same thing, the reranker which documents
+answer a query.
 
 **And the core operation is one you have used.** Represent things as vectors, compare them
 with a cosine. Decades old, and what changed is where the numbers come from.
