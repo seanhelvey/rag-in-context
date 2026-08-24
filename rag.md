@@ -105,13 +105,13 @@ figures.locate("chunk")
 
 First thing that happens to the corpus. Retrieval returns passages rather than whole files,
 because a file is too big for the prompt and too broad to match a question. Cut too small and a piece loses
-its context, too large and it covers several topics at once.
+its context, too large and it covers several topics.
 
 `RecursiveCharacterTextSplitter` does the cutting, and it is the splitter most RAG code you
 meet uses. It ships in `langchain-text-splitters`, installed without the framework.
 *Recursive character* names the algorithm: try separators in order, coarsest first. Blank
-lines, then single lines, then spaces, then anywhere. So it breaks at a paragraph boundary
-when it can and mid-word only when it must.
+lines, then lines, then spaces, then anywhere. It breaks at a paragraph boundary when it can
+and mid-word only when it must.
 
 ```python
 import re, pathlib, numpy as np, figures
@@ -162,8 +162,10 @@ language model. It emits one vector per passage rather than the next word, and w
 pairs of sentences that either do or do not mean the same thing. Underneath is a
 **transformer**, where every token mixes in whatever other tokens are relevant to it, which
 is how "reset" and "wipe" land near each other with no rule saying so. Same family as the
-reranker in section 6 and as any LLM, differing in size and in what training rewarded.
-`sentence-transformers` runs either, and supplies both here.
+reranker and as any LLM, differing in size and in what training rewarded.
+`sentence-transformers` runs either and supplies both here. Under it sit Hugging Face's
+`transformers` and PyTorch: the encoder below downloads from the Hugging Face hub and is a
+`torch.nn.Module`, the stack a neural nets course hands you.
 
 ```python
 from transformers.utils import logging as hf_logging
@@ -188,11 +190,11 @@ model like `bge` or `e5`. Pick on a benchmark like MTEB, not on dimension count.
 
 That matrix is `E`, and every search here is something done to it. **Each row is one chunk.**
 The 384 numbers inside a row mean nothing individually: there is no dimension for "database".
-Direction carries the meaning, which is why everything below compares whole rows and never
-looks inside one.
+Direction carries the meaning, which is why everything below compares whole rows, never one
+number.
 
-Every row is also scaled to length 1. For unit vectors the dot product *is* the cosine of
-the angle between them, so comparing two chunks is one multiplication rather than a formula.
+Every row is scaled to length 1. For unit vectors the dot product *is* the cosine of the
+angle between them, so comparing two chunks is one multiplication, not a formula.
 
 Below, one chunk is the reference and four others sit at the angle the model produced.
 
@@ -212,17 +214,16 @@ figures.cosine_fan("platform constraints", list(picked),
                    [float(E[ref] @ E[k]) for k in picked.values()], E)
 ```
 
-The nearest passage sits 49 degrees away and is another set of platform constraints, from a
-different file. The next one, at 60 degrees, is the same concern in an unrelated project,
-and nobody told the model those two projects had anything in common. A dev-server passage
-sits at 83, close to unrelated. A colour palette sits
-just past 90 degrees, giving a small negative cosine. Negative means unrelated rather than
-opposite: no pair of chunks here falls below -0.25.
+The nearest passage sits 49 degrees away, another set of platform constraints from a
+different file. The next, at 60 degrees, is the same concern in an unrelated project, and
+nobody told the model those projects had anything in common. A dev-server passage sits at 83,
+close to unrelated. A colour palette is just past 90, a small negative cosine, which means
+unrelated rather than opposite: no pair here falls below -0.25.
 
-The right-hand panel changes how to read every score here. Two random directions in 3
-dimensions can be at any angle, but in 384 dimensions they are almost always near 90 degrees,
-the grey pile at 0. Real chunks average 0.12 because they share a great deal before you reach
-their topic: English, software, markdown, one person's habits.
+The right-hand panel changes how to read every score. Two random directions in 3 dimensions
+can be at any angle, but in 384 they are almost always near 90 degrees, the grey pile at 0.
+Real chunks average 0.12 because they share a lot before you reach their topic: English,
+software, markdown, one person's habits.
 
 So the 0.42 topping the search in section 4 is a strong match while sounding weak, which
 makes a fixed threshold a shaky way to decide whether to answer.
@@ -291,7 +292,7 @@ That table is the idea: a rare token is worth about four times a common one. `th
 than half the chunks and scores below zero on the textbook formula, and `rank_bm25` floors it
 to 1.18. A floor is not a removal. At 1.18, a quarter of what `5433` earns, "how do I wipe my
 local database" rides nearly as much on `how` and `do` as on `database`. So the query drops a
-stopword list first, as every text index does. If you have used `TfidfVectorizer` you have
+stopword list first, as every text index does. If you have used scikit-learn's `TfidfVectorizer` you have
 used most of this. What BM25 adds is saturation, so the twentieth "postgres" counts
 barely more than the third, and a length penalty, so a long chunk cannot win by being big.
 
@@ -379,8 +380,8 @@ for item in queries:
         print(f"{'meaning' if hit[0] else 'keyword':>7} only:  {item['q']}")
 ```
 
-Six questions split four to two. Running both should therefore beat either, which is a claim
-the next section has to prove rather than assert.
+Six questions split four to two, so running both should beat either. That is a claim the next
+section has to prove rather than assert.
 
 ## 6. Fusing and reranking
 
@@ -458,12 +459,11 @@ before = hybrid(q, k=12, pool=12)
 figures.rank_movement(q, before, rerank(q, before), chunks, marker="5173")
 ```
 
-*In production:* Cohere Rerank, `bge-reranker-v2-m3`, or Voyage.
+*In production:* Cohere Rerank, `bge-reranker-v2-m3`, Voyage.
 
 Orange marks the two chunks mentioning port 5173, which a correct answer needs. Fusion had
 them at ranks 2 and 5, the reranker moved them to 1 and 3. Same candidates, better order. The
-figure uses a pool of twelve so it fits the page; the eval uses twenty-five, and the prompt
-has room for about three.
+figure uses a pool of twelve so it fits the page; the eval uses twenty-five.
 
 ```python
 results["fused + rerank"] = evaluate(hybrid_reranked)
@@ -488,8 +488,8 @@ the number more than any of them is a set of choices that are not models, and th
 settles those.
 
 **Where you cut.** An eval earns its keep by catching a change that made things worse. Say
-smaller chunks sound more precise, so the size drops from 400 to 150. Two numbers, it runs
-without error, and every answer still looks plausible.
+smaller chunks sound more precise, so the size drops from 400 to 150. It runs without error
+and every answer still looks plausible.
 
 ```python
 before = evaluate(hybrid)[0]
@@ -543,7 +543,7 @@ print(f"{len(edited) - len(fresh)} of {len(edited)} embeddings reused")
 
 One chunk changed, so one needs embedding and its old copy is dropped. A real edit shifts the
 chunks after it too, and their hashes move with their text: identity comes from content, not
-position. Keyword search is rebuilt regardless, since document frequency is corpus-wide.
+position. Keyword search is rebuilt regardless, document frequency being corpus-wide.
 
 The one that catches people: **a new embedding model means re-embedding everything.**
 Vectors from two models are not comparable, so there is no incremental path. A
