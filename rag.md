@@ -79,21 +79,23 @@ polish on a chat model is done.
 
 **Traditional ML against deep learning.** Logistic regression, decision trees and gradient
 boosting learn from features you engineer, and still win on tabular data. Deep learning
-stacks learned transformations and finds its own features, which is what made text
-tractable.
+stacks layers of neural network and lets them find their own features, which is what made
+text tractable.
 
-**RAG is none of the above.** No training happens here at all. It is an architecture: search,
-then paste into a prompt, which gives a model your documents without the cost and risk of
-fine-tuning. Fine-tuning teaches new *behaviour*, retrieval gives new *facts*, and plenty of
-people reaching for the first want the second.
+**RAG trains nothing.** The models arrive already trained, by someone else, months ago. RAG
+is the architecture around them: search, then paste into a prompt, which gives a model your
+documents without the cost or risk of fine-tuning. Fine-tuning teaches new *behaviour*,
+retrieval gives new *facts*, and plenty of people reaching for the first want the second.
 
-**Where the pieces here sit.** Keyword search does not learn at all: arithmetic over word
-counts, from the 1990s. Both models do, and both are six-layer BERTs pretrained without
-labels then fine-tuned on pairs. The embedding model learned which sentences mean the same
-thing, the reranker which documents answer a query.
+**Where the pieces sit.** Keyword search has no learned parameters at all: arithmetic over
+word counts, from the 1990s. Both models are six-layer neural networks, BERTs, pretrained
+without labels then fine-tuned on pairs. The embedding model learned which sentences mean the
+same thing, the reranker which documents answer a query.
 
-**The core operation is one you have used.** Represent things as vectors, compare with a
-cosine. Decades old; what changed is where the numbers come from.
+**The core operation is older than any of it.** Represent things as vectors, compare them
+with a cosine: that is the vector space model, from 1975. The arithmetic has not changed. The
+coordinates have, from word counts you picked to numbers a network learned, and that is the
+difference between matching words and matching meaning.
 
 ## 2. Cutting documents into chunks
 
@@ -182,7 +184,7 @@ print("every row has length 1:", np.allclose(np.linalg.norm(E, axis=1), 1.0))
 ```
 
 *In production:* a hosted embedding API such as Voyage, OpenAI or Cohere, or a larger open
-model like `bge` or `e5`. More dimensions usually means better matching and more storage.
+model like `bge` or `e5`. Pick on a benchmark like MTEB, not on dimension count.
 
 That matrix is `E`, and every search here is something done to it. **Each row is one chunk.**
 The 384 numbers inside a row mean nothing individually: there is no dimension for "database".
@@ -286,16 +288,16 @@ for term in ["the", "database", "postgres", "5433"]:      # bm25.idf is what it 
 ```
 
 That table is the idea: a rare token is worth about four times a common one. `the` is in more
-than half the chunks and scores below zero on the textbook formula. `rank_bm25` floors it to
-1.18, so a common word cannot penalise the chunks holding it. A floor is not a removal. At
-1.18, a quarter of what `5433` earns, "how do I wipe my local database" rides nearly as much
-on `how` and `do` as on `database`. So the query drops a stopword list first, as every text
-index does. If you have used `TfidfVectorizer` you have used most of this. What BM25 adds is saturation, so the twentieth "postgres" counts
+than half the chunks and scores below zero on the textbook formula, and `rank_bm25` floors it
+to 1.18. A floor is not a removal. At 1.18, a quarter of what `5433` earns, "how do I wipe my
+local database" rides nearly as much on `how` and `do` as on `database`. So the query drops a
+stopword list first, as every text index does. If you have used `TfidfVectorizer` you have
+used most of this. What BM25 adds is saturation, so the twentieth "postgres" counts
 barely more than the third, and a length penalty, so a long chunk cannot win by being big.
 
 *In production:* Elasticsearch or OpenSearch, where BM25 usually lives at scale, or Postgres
 full-text search. Postgres `ts_rank` is frequency-based rather than true BM25, and lexical
-only, with no embeddings involved.
+only.
 
 Those two searches produce vectors of different shapes, and the names are worth knowing
 because papers and vector databases use them constantly. By meaning is **dense**: 384
@@ -321,8 +323,7 @@ compare("what port does local Postgres listen on?", "5433")
 They fail in opposite directions. The first needs `make reset`, which shares no words with
 "wipe" or "start over", so keyword search never sees it. The second needs the exact token
 `5433`, which keyword search puts second and the embedding never surfaces. Rare exact tokens
-are the general case: error codes, customer IDs, part numbers, what people search for at
-work.
+are the general case: error codes, customer IDs, part numbers.
 
 ## 5. Measuring retrieval
 
@@ -367,7 +368,7 @@ for name, (r, m) in results.items():
 **MRR** adds *how high*: 1 if the right chunk came first, 1/2 if second, 1/3 if third, 0 if
 it never appeared, averaged over the questions.
 
-Neither is strictly better. Keyword search finds more answers, 0.89 against 0.78, and ranks
+Neither is strictly better: keyword search finds more answers, 0.89 against 0.78, and ranks
 them worse, 0.52 against 0.61. More usefully, they miss different questions.
 
 ```python
@@ -423,19 +424,19 @@ for damp in (1, 5, 20, 60):
 results["both, fused"] = evaluate(hybrid)     # damp=1, the row the sweep picked
 ```
 
-`damp` sets how flat each list's votes are, and it is the one parameter here worth measuring
+`damp` sets how flat each list's votes are, and is the one parameter here worth measuring
 rather than copying. The original paper used 60 on lists of a thousand. At a pool of 25 that
 is far too large. The best a single list can offer is 1/60, while anything on both lists
 scores at least 2/84, so every intersection beats every non-intersection and position stops
-counting. The sweep prices that mistake at 0.94 against 0.83.
+counting. The sweep prices that at 0.94 against 0.83.
 
 Fusion lifts recall and leaves ordering roughly where it found it. Fixing the order needs a
 different kind of model.
 
 Everything so far compares vectors computed separately, the chunks long before the question
 arrived. That is what makes search fast, and means a chunk's vector cannot depend on what was
-asked. A **cross-encoder** puts the question and one chunk through the model together, so it
-weighs them against each other directly. Much more accurate, far too slow for every chunk.
+asked. A **cross-encoder** puts the question and one chunk through the model together and
+weighs them directly. Much more accurate, far too slow for every chunk.
 
 Hence the usual arrangement: retrieve 25 candidates cheaply, rescore those carefully, keep
 the best few. That rescoring model is the **reranker**, the box of that name in the diagram,
@@ -483,12 +484,12 @@ figures.locate(spans=(0, 2), loop=True, note="change one of these, score it agai
 ```
 
 That is the retrieval stack finished: 0.78 to 0.94, four methods, each measured. What decides
-the number more than any of them is a set of choices that are not models, and the eval is
-what settles them instead of leaving them to opinion.
+the number more than any of them is a set of choices that are not models, and the eval is what
+settles those.
 
 **Where you cut.** An eval earns its keep by catching a change that made things worse. Say
-smaller chunks sound more precise, so the size drops from 400 characters to 150. Two numbers,
-it runs without error, and every answer still looks plausible.
+smaller chunks sound more precise, so the size drops from 400 to 150. Two numbers, it runs
+without error, and every answer still looks plausible.
 
 ```python
 before = evaluate(hybrid)[0]
@@ -556,8 +557,7 @@ figures.locate("prompt")
 ```
 
 The G, at last, and it is one request with the retrieved text in the prompt. No API call
-here, which is partly the point: everything above was measured without a language model in
-the loop.
+here, which is partly the point: everything above was measured without one.
 
 ```python
 question = "why is the rate limiter backed by the database instead of kept in memory?"
@@ -611,5 +611,5 @@ often run a LlamaIndex retriever as a tool inside a LangChain loop.
 ## The short version
 
 Almost none of the work is in the vector math. It is in cutting documents sensibly, running
-keyword search alongside semantic search, and writing down enough labelled questions to
-have a number to point at when someone proposes a change.
+keyword search alongside semantic search, and writing down enough labelled questions to have
+a number to point at when someone proposes a change.
