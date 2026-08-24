@@ -3,3 +3,5 @@ matplotlib
 sentence-transformers
 jupyter
 jupytext
+rank_bm25
+langchain-text-splitters

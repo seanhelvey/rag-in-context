@@ -13,7 +13,7 @@ over?"* about a project whose README says `make reset`. Keyword search misses it
 you did not guess the author's words. Search by meaning finds it, because "wipe" and
 "reset" sit near each other once words are vectors. Now ask which port local Postgres
 listens on. The answer is the bare token `5433`, so keyword search goes straight to it
-and search by meaning never surfaces it. A real system runs both, and section 3 shows
+and search by meaning never surfaces it. A real system runs both, and section 4 shows
 each one failing where the other works.
 
 About a twenty minute read. It is written to be *read* as much as run: outputs and figures
@@ -28,22 +28,22 @@ Four methods, scored on 18 hand-labelled questions:
 
 | method | recall@5 | MRR |
 |---|---|---|
-| by meaning (dense embeddings) | 0.78 | 0.69 |
-| by keyword (BM25) | 0.78 | 0.62 |
-| both, fused (RRF) | 0.89 | 0.65 |
-| fused + rerank (cross-encoder) | **0.94** | **0.85** |
+| by meaning (dense embeddings) | 0.78 | 0.61 |
+| by keyword (BM25) | 0.72 | 0.53 |
+| both, fused (RRF) | 0.83 | 0.53 |
+| fused + rerank (cross-encoder) | **0.94** | **0.78** |
 
 **recall@5** is how often the right passage appeared in the top five. **MRR** is how high
 it landed. Grading is at passage level: a labelled question names the exact string a
 correct passage has to contain.
 
-The two search methods tie, and fail on different questions, which is the reason to run
-both. Fusing them lifts recall. Only the reranker fixes the order.
+The two search methods land close, and fail on different questions, which is the reason to
+run both. Fusing them lifts recall. Only the reranker fixes the order.
 
 With 18 questions each one is worth 0.06 recall, so this can say "that change was a bad
-idea" and cannot referee 0.89 against 0.94. Section 5 says so rather than rounding up, and
-spends a cell watching the eval catch a plausible chunking change that quietly breaks
-two of the eighteen questions.
+idea" and cannot referee 0.83 against 0.94. Section 6 says so rather than rounding up, and
+section 7 spends a cell watching the eval catch a plausible chunking change that quietly
+breaks four of the eighteen questions.
 
 One question defeats all four. Two of these projects run a dev server on port 5173, so
 *"start the frontend dev server"* has no single right answer. No retriever fixes that; a
@@ -55,12 +55,13 @@ metadata filter does. The ceiling turns out to be more instructive than the scor
 |---|---|
 | **The problem** | why a language model cannot answer from your documents, and what to do about it |
 | **1. Where this sits** | RAG involves no training. Where its pieces land against supervised, unsupervised, traditional and deep learning |
-| **2. From text to vectors** | documents into chunks, chunks into embeddings, and why cosine similarity is the idea you already know with the coordinates learned rather than chosen |
-| **3. Two ways to search** | by meaning and by keyword, shown failing on different questions |
-| **4. Combining and reordering** | fusing two ranked lists, then a slower model fixing the order |
-| **5. Does any of it work?** | the 18 questions, the scores, and the eval catching a change that looks like an improvement |
-| **6. The decisions that matter** | where you cut, questions with no single answer, and keeping embeddings fresh |
-| **7. The generation half** | assembling the prompt, and what each instruction prevents. It prints the prompt rather than sending it, which is what keeps the notebook keyless |
+| **2. Cutting documents into chunks** | why retrieval returns passages rather than files, and what the overlap is for, shown at a real seam |
+| **3. Text as vectors** | what an embedding is and is not, why each row is one chunk, and why cosine similarity is the idea you already know with the coordinates learned rather than chosen |
+| **4. Two ways to search** | by meaning and by keyword, shown failing on different questions |
+| **5. Measuring retrieval** | the 18 labelled questions and the two metrics, before anything is improved, plus which questions each method alone gets right |
+| **6. Fusing and reranking** | fusing two ranked lists, then a slower model fixing the order, measuring after each |
+| **7. What moves the numbers** | the eval catching a change that looks like an improvement, where you cut, questions with no single answer, and keeping embeddings fresh |
+| **8. Generation, in one prompt** | assembling the prompt, and what each instruction prevents. It prints the prompt rather than sending it, which is what keeps the notebook keyless |
 
 Where a piece has an obvious production counterpart, an *In production* note names it on
 the spot: LangChain, `rank_bm25`, Elasticsearch, Cohere Rerank and the rest.
