@@ -76,8 +76,11 @@ else:
             elif (row.group(1), row.group(2)) != (r, mrr):
                 stale.append(f"{fname}: {method} says {row.group(1)}/{row.group(2)}, "
                              f"notebook printed {r}/{mrr}")
-    # Prose quotes individual scores; flag any that match nothing the eval produced.
+    # Prose quotes individual scores. Harvest every recall/MRR the notebook printed,
+    # including the damp sweep, so a real number is never flagged as invented.
     live = {v for pair in actual.values() for v in pair}
+    for cell in nb["cells"]:
+        live |= set(re.findall(r"(?:recall@5|MRR) ([\d.]+)", out_text(cell)))
     for quoted in set(re.findall(r"(?<![-\d.])0\.\d\d\b", prose)):
         if quoted not in live and quoted not in {"0.42", "0.12", "0.06"}:
             stale.append(f"rag.md prose quotes {quoted}, which no method scored")

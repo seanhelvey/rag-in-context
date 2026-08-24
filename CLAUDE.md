@@ -35,12 +35,12 @@ Chunking, done all three ways, is the clearest case:
 
 ```python
 # 1. the library does the work
-splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=150)
+splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
 chunks = splitter.split_text(doc)
 
 # 2. break it down by looking at what it did
 print(splitter._separators)        # ['\n\n', '\n', ' ', ''] - tried in order, coarse first
-print(chunks[7][-160:])            # cut at the 900 limit, mid-sentence
+print(chunks[7][-160:])            # cut short of the 400 limit, mid-sentence
 print(chunks[8][:160])             # the same sentence, whole again, thanks to the overlap
 ```
 
@@ -206,6 +206,26 @@ in this notebook rather than an assertion.
 section 6 of 8, after four sections of technique. Check its position before shipping any
 restructure.
 
+## Two bugs that made the notebook teach the wrong lesson
+
+**Found on 2026-08-24 by a reviewer agent, verified before acting on. Both had been in the
+notebook for its whole life and neither broke anything visibly.**
+
+1. **RRF was degenerate.** `damp=60` came from the original paper, which fused lists of a
+   thousand. At `pool=25` the best a single list can offer is 1/60 while anything on both
+   lists scores at least 2/84, so every intersection beat every non-intersection and rank
+   stopped counting. It was a set-intersection vote wearing rank fusion's name. The sweep now
+   lives in the notebook: 0.94 at `damp=1` against 0.83 at 60.
+2. **BM25 scored the stopwords.** `rank_bm25` floors negative IDF to 1.18 here, a quarter of
+   what `5433` earns, so in "how do I wipe my local database" the words `how` and `do` nearly
+   outweighed `database`. Queries now drop a stopword list, as every production text index
+   does. By-keyword recall went 0.72 to 0.89.
+
+Together these produced the notebook's one non-obvious finding, that fusion raises recall and
+lowers MRR, and the prose explained it with a sentence that was wrong twice over ("it cannot
+tell first place from fifth", of an algorithm that uses nothing but rank). **A borrowed
+constant is a claim like any other. Sweep it or do not print a lesson about it.**
+
 ## Cold reads find what checks cannot
 
 A subagent read the notebook on 2026-08-23 as the target reader, in order, reporting only
@@ -283,7 +303,7 @@ Every one of those exists because it broke silently once. The procedure around i
 matplotlib cache warning into cell 1 and commits a temp path into the notebook.
 
 Run everything from the repo root; all paths in the notebook are relative. A full execute
-takes ~90s on CPU. The venv exists; fresh setup is `python -m venv .venv && .venv/bin/pip
+takes about 30s on CPU. The venv exists; fresh setup is `python -m venv .venv && .venv/bin/pip
 install -r requirements.txt`.
 
 ## The edit loop
@@ -390,9 +410,9 @@ surrounding markdown has to change too**:
 | method | recall@5 | MRR |
 |---|---|---|
 | by meaning | 0.78 | 0.61 |
-| by keyword | 0.72 | 0.53 |
-| both, fused | 0.83 | 0.53 |
-| fused + rerank | 0.94 | 0.78 |
+| by keyword | 0.89 | 0.52 |
+| both, fused | 0.94 | 0.60 |
+| fused + rerank | 0.94 | 0.77 |
 
 ## Corpus
 
@@ -481,8 +501,6 @@ The five that survive, each showing a mechanism rather than decorating:
   answers so the reorder can be judged rather than admired.
 - **Retrieval quality** (section 6): recall@5 and MRR for all four methods, drawn only
   once all four exist.
-- **Chunk windows** (section 7): an 1100-char section with the 400-wide windows below it
-  and the 80-char overlaps in orange.
 - **Locator** (under every heading from 2): the pipeline's six steps at a glance, marked one
   of three ways. The only figure that repeats, and the only one whose job is navigation.
 

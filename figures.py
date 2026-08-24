@@ -118,18 +118,18 @@ def cosine_fan(ref_label, labels, cosines, E):
     a1.text(1.04, 0, f"  {ref_label}\n  (measured from)", fontsize=8.5,
             color=ORANGE, va="center", fontweight="bold")
 
+    # Labels sit at the arrow tips and run rightwards, so two arrows only 10 degrees
+    # apart put their text at nearly the same height and overprint. Staggering the
+    # radius by rank separates them vertically whatever the angles happen to be.
     order = np.argsort([np.arccos(np.clip(c, -1, 1)) for c in cosines])
-    level, prev = 0, None
-    for k in order:
+    for rank, k in enumerate(order):
         label, cos = labels[k], cosines[k]
         deg = np.degrees(np.arccos(np.clip(cos, -1, 1)))
-        level = level + 1 if prev is not None and deg - prev < 14 else 0
-        prev = deg
         r = np.radians(deg)
         x, y = np.cos(r), np.sin(r)
         a1.annotate("", xy=(x, y), xytext=(0, 0),
                     arrowprops=dict(arrowstyle="-|>", color=GREEN, lw=2.2))
-        lr = 1.07 + 0.20 * level                # push clustered labels further out
+        lr = 1.07 + 0.23 * rank
         a1.plot([x, x * lr], [y, y * lr], color="#cfe6dd", lw=.9, zorder=0)
         a1.text(x * lr, y * lr, f" {label}\n cos {cos:+.2f}, {deg:.0f} deg",
                 fontsize=8, color="#1a6a55", va="center",
@@ -138,7 +138,7 @@ def cosine_fan(ref_label, labels, cosines, E):
     th = np.radians(np.linspace(0, 118, 200))
     a1.plot(np.cos(th) * .99, np.sin(th) * .99, color="#e8e8e8", lw=1, zorder=0)
     a1.plot([0, 0], [0, 1.62], color=GREY, lw=1.1, ls="--")
-    a1.set_xlim(-1.5, 1.85); a1.set_ylim(-0.2, 1.75)
+    a1.set_xlim(-1.6, 2.05); a1.set_ylim(-0.2, 2.15)
     a1.set_aspect("equal"); a1.axis("off")
     a1.set_title("Chunks as arrows, at their real angles", fontsize=11, loc="left")
 

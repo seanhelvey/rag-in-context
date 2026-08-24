@@ -45,7 +45,7 @@ import figures
 figures.pipeline()
 ```
 
-Two loops: the top row runs once whenever the documents change, the bottom row for every
+Two passes: the top row runs once whenever the documents change, the bottom row for every
 question.
 
 *In production:* you would call a framework instead. This is LlamaIndex, from its starter
@@ -61,17 +61,15 @@ answer    = index.as_query_engine().query(question)      # retrieves, ranks, pro
 
 LlamaIndex because it leads on ingestion and retrieval and gets there in three lines.
 LangChain leads on chaining and agents, and section 2 borrows its splitter. Mixing them is
-ordinary.
+normal.
 
 The last two lines are this whole notebook. **Sections 2 to 7 are the R, and section 8 alone
-is the G**, which is the ratio in miniature: retrieval is where the engineering is and
-generation is one prompt. Every box above holds a decision the framework makes for you, and
-sections 5 and 7 measure those decisions, which no call does. Nothing below runs a framework:
-each section imports one small library, or none, and shows what it did.
+is the G**: retrieval is where the engineering is, generation is one prompt. Every box holds
+a decision the framework makes for you, and sections 5 and 7 measure those. Nothing below
+runs a framework: each section imports one small library, or none, and shows what it did.
 
-The strip under each heading is that diagram again, same names and phases. Orange is whatever
-the section is about: a lit box, a bracket over the boxes some choice acts on, or a loop for
-the scoring cycle. Green dashed is the vectors, computed once and searched every time.
+The strip under each heading is that diagram again. Orange marks whatever the section is
+about; green dashed is always the vectors.
 
 ## 1. Where this sits in the ML you already know
 
@@ -94,8 +92,8 @@ with a cosine. Decades old, and what changed is where the numbers come from.
 figures.locate("chunk")
 ```
 
-First box on the top row. Retrieval returns passages rather than whole files, because a file
-is too big for the prompt and too broad to match a question. Cut too small and a piece loses
+First thing that happens to the corpus. Retrieval returns passages rather than whole files,
+because a file is too big for the prompt and too broad to match a question. Cut too small and a piece loses
 its context, too large and it covers several topics at once.
 
 `RecursiveCharacterTextSplitter` does the cutting, and it is the splitter most RAG code you
@@ -124,17 +122,17 @@ print(f"{len(chunks)} chunks from {len(list(CORPUS.glob('*.md')))} files, "
       f"median {int(np.median([len(c['text']) for c in chunks]))} chars")
 ```
 
-The `chunk_overlap=80` repeats the last 80 characters of each piece at the start of the
-next. Section 7 comes back to what the size costs.
+`chunk_overlap=80` asks for the last 80 characters to reappear at the start of the next
+piece. It only does where the splitter had to cut mid-paragraph, which is a third of the
+seams here. Section 7 comes back to what the size costs.
 
 ```python
 i = next(k for k, c in enumerate(chunks) if "Adoption peaked near" in c["text"])
-print(f"end of chunk {i}:    ...{chunks[i]['text'][-88:]}")
-print(f"start of chunk {i+1}:  {chunks[i+1]['text'][:88]}...")
+print(f"end of {i}:    ...{chunks[i]['text'][-88:]}\nstart of {i+1}:  {chunks[i+1]['text'][:88]}...")
 ```
 
-The first piece stops mid-sentence at the size limit. The second opens with that same
-sentence intact, which is the overlap doing its job.
+The first piece stops mid-sentence, short of 400 because the next line would cross it. The
+second opens with that sentence intact, which is the overlap doing its job.
 
 ## 3. Text as vectors
 
@@ -160,8 +158,7 @@ reranker in section 6 and as any LLM, differing in size and in what training rew
 from transformers.utils import logging as hf_logging
 from sentence_transformers import SentenceTransformer
 
-# Loading the model prints a progress bar that freezes at 0% in a saved notebook.
-# transformers ships with sentence-transformers, so this costs no extra dependency.
+# The progress bar freezes at 0% in a saved notebook, so turn it off.
 hf_logging.disable_progress_bar()
 
 encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
@@ -216,9 +213,8 @@ dimensions can be at any angle, but in 384 dimensions they are almost always nea
 the grey pile at 0. Real chunks average 0.12 because they share a great deal before you reach
 their topic: English, software, markdown, one person's habits.
 
-So the 0.42 topping the search in section 4 is a strong match while sounding weak. Scores
-mean something relative to other scores for the same question, which makes a fixed threshold
-a shaky way to decide whether to answer.
+So the 0.42 topping the search in section 4 is a strong match while sounding weak, which
+makes a fixed threshold a shaky way to decide whether to answer.
 
 ## 4. Two ways to search
 
@@ -247,18 +243,17 @@ for rank, i in enumerate(best(scores, 3), 1):
 
 *In production:* a vector database. `E @ q` is all the comparison there is; a store adds
 persistence, metadata filters, and an index that finds approximately the nearest vectors
-without scanning all of them, which starts to matter around a hundred million rows. If you
-have used **pgvector**, `ORDER BY embedding <=> $1` is this same cosine, with the vectors
-beside your relational data so scoping a search is a `WHERE` clause.
+without scanning all of them, which starts to matter in the low millions, on memory before
+latency. If you have used **pgvector**, `ORDER BY embedding <=> $1` is this same cosine, with
+the vectors beside your relational data so scoping a search is a `WHERE` clause.
 
 The other way to search is by keyword, and the standard is **BM25**. It scores a chunk by
 the query words it literally contains, weighted by two ideas. **Term frequency**: a chunk
 mentioning "postgres" five times beats one mentioning it once. **Inverse document
-frequency**: a word appearing in every chunk tells you nothing, so "the" is worthless and a
-rare token like a port number is valuable.
+frequency**: a word in every chunk tells you nothing, a rare one tells you a lot.
 
-The formula comes from `rank_bm25`, a single-purpose package. The frequency table underneath
-it is built here, because seeing real numbers is what makes the second idea concrete.
+`rank_bm25` has the formula. The table under it is built here, because the second idea only
+lands with real numbers.
 
 ```python
 from rank_bm25 import BM25Okapi
@@ -267,26 +262,28 @@ def tokenize(s):
     return re.findall(r"[a-z0-9]+", s.lower())
 
 def index_keywords(chunks):
-    # Rebuilt whenever the chunking changes, since every count below depends on it.
-    global docs, bm25
+    global docs, bm25                        # rebuilt whenever the chunking changes
     docs = [tokenize(c["text"]) for c in chunks]
     bm25 = BM25Okapi(docs)
     return Counter(t for d in docs for t in set(d))   # chunks containing each word
 
 df = index_keywords(chunks)
 
-def search_by_keyword(query):
-    return bm25.get_scores(tokenize(query))
+STOP = set("a an and are as at be by do does for from how i if in into is it its of on or "
+           "that the this to was what when where which who why with you your".split())
+def search_by_keyword(query):                 # stopwords out of the query, not the index
+    return bm25.get_scores([w for w in tokenize(query) if w not in STOP])
 
-for term in ["the", "database", "postgres", "5433"]:      # bm25.idf is the table it scores with
+for term in ["the", "database", "postgres", "5433"]:      # bm25.idf is what it scores with
     print(f"{term:>10}  in {df[term]:>3} of {len(docs)} chunks   idf {bm25.idf[term]:.2f}")
 ```
 
-That table is the idea: a rare token is worth about four times a common one. `the` appears
-in more than half the chunks, which scores below zero on the textbook formula. `rank_bm25`
-floors that to a small positive number, so a common word cannot actively penalise the
-chunks holding it. If you have used `TfidfVectorizer` from scikit-learn you have used
-most of this already. What BM25 adds is saturation, so the twentieth "postgres" counts
+That table is the idea: a rare token is worth about four times a common one. `the` is in more
+than half the chunks and scores below zero on the textbook formula. `rank_bm25` floors it to
+1.18, so a common word cannot penalise the chunks holding it. A floor is not a removal. At
+1.18, a quarter of what `5433` earns, "how do I wipe my local database" rides nearly as much
+on `how` and `do` as on `database`. So the query drops a stopword list first, as every text
+index does. If you have used `TfidfVectorizer` you have used most of this. What BM25 adds is saturation, so the twentieth "postgres" counts
 barely more than the third, and a length penalty, so a long chunk cannot win by being big.
 
 *In production:* Elasticsearch or OpenSearch, where BM25 usually lives at scale, or Postgres
@@ -363,8 +360,8 @@ for name, (r, m) in results.items():
 **MRR** adds *how high*: 1 if the right chunk came first, 1/2 if second, 1/3 if third, 0 if
 it never appeared, averaged over the questions.
 
-Two numbers that close would normally mean "pick either". Ask *which* questions each one
-misses and they do not.
+Neither method is strictly better. Keyword search finds more answers, 0.89 against 0.78, and
+ranks them worse, 0.52 against 0.61. More usefully, they miss different questions.
 
 ```python
 for item in queries:
@@ -374,8 +371,8 @@ for item in queries:
         print(f"{'meaning' if hit[0] else 'keyword':>7} only:  {item['q']}")
 ```
 
-They fail on almost disjoint sets, so neither is a strictly better ranker and running both
-should beat either. That is a claim the next section has to prove rather than assert.
+Six questions split four to two. Running both should therefore beat either, which is a claim
+the next section has to prove rather than assert.
 
 ## 6. Fusing and reranking
 
@@ -391,9 +388,9 @@ it.
 
 If you have combined weak models before, this is that idea, applied to ranked lists.
 ```python
-def rrf(rankings, k=5, damp=60):
-    # Each list votes 1/(damp + rank) for what it put where. 60 is from the original paper
-    # and flattens each list's top, so one confident-but-wrong ranker cannot run away with it.
+def rrf(rankings, k=5, damp=1):
+    # Each list votes 1/(damp + rank) for what it put where. damp flattens the top of each
+    # list; the next cell is why it is 1 here and not the 60 the original paper used.
     votes = Counter()
     for ranking in rankings:
         for rank, idx in enumerate(ranking):
@@ -412,14 +409,21 @@ print(rrf([["A", "B", "C"], ["C", "A", "D"]], k=4))
 now ship.
 
 ```python
-results["both, fused"] = evaluate(hybrid)
-print(f"both, fused      recall@5 {results['both, fused'][0]:.2f}   "
-      f"MRR {results['both, fused'][1]:.2f}")
+for damp in (1, 5, 20, 60):
+    r, m = evaluate(lambda q, k, d=damp: rrf([list(best(search_by_meaning(q), 25)),
+                                              list(best(search_by_keyword(q), 25))], k, d))
+    print(f"damp={damp:<3} recall@5 {r:.2f}   MRR {m:.2f}")
+results["both, fused"] = evaluate(hybrid)     # damp=1, the row the sweep picked
 ```
 
-Recall went up and MRR went down, below what searching by meaning alone managed. Fusion is
-good at dragging the right chunk into the top few and bad at knowing which of them is best.
-Fixing the order needs a different kind of model.
+`damp` sets how flat each list's votes are, and it is the one parameter here worth measuring
+rather than copying. The original paper used 60 on lists of a thousand. At a pool of 25 that
+is far too large. The best a single list can offer is 1/60, while anything on both lists
+scores at least 2/84, so every intersection beats every non-intersection and position stops
+counting. The sweep prices that mistake at 0.94 against 0.83.
+
+Fusion lifts recall and leaves ordering roughly where it found it. Fixing the order needs a
+different kind of model.
 
 Everything so far compares vectors computed separately, the chunks long before the question
 arrived. That is what makes search fast, and means a chunk's vector cannot depend on what was
@@ -441,7 +445,6 @@ def rerank(query, idxs):
 
 def hybrid_reranked(query, k=5, pool=25):
     return rerank(query, hybrid(query, k=pool, pool=pool))[:k]
-
 q = "start the frontend dev server with hot reload"
 before = hybrid(q, k=12, pool=12)
 figures.rank_movement(q, before, rerank(q, before), chunks, marker="5173")
@@ -450,8 +453,9 @@ figures.rank_movement(q, before, rerank(q, before), chunks, marker="5173")
 *In production:* Cohere Rerank, `bge-reranker-v2-m3`, or Voyage.
 
 Orange marks the two chunks mentioning port 5173, which a correct answer needs. Fusion had
-them at ranks 2 and 5, the reranker moved them to 1 and 3. Same candidates, better order,
-and that matters because the prompt has room for about three chunks, not twenty-five.
+them at ranks 2 and 5, the reranker moved them to 1 and 3. Same candidates, better order. The
+figure uses a pool of twelve so it fits the page; the eval uses twenty-five, and the prompt
+has room for about three.
 
 ```python
 results["fused + rerank"] = evaluate(hybrid_reranked)
@@ -460,10 +464,10 @@ for name, (r, m) in results.items():
 figures.retrieval_quality(results, len(queries))
 ```
 
-Read the four bars as the argument in order. The two searches land close, 0.78 and 0.72, and
-miss different questions, so fusion lifts recall to 0.83. Fusion leaves MRR at 0.53 because
-it cannot tell first place from fifth. The reranker takes those same candidates and fixes
-the order, 0.53 to 0.78, the largest single move in the chart.
+The bars are the argument in order. The two searches miss different questions, so fusion
+reaches 0.94, every answer the pair can find between them. Its MRR lands between theirs,
+because merging two rankings says nothing about which of the merged is best. The reranker
+leaves recall alone and moves MRR from 0.60 to 0.77: same answers, better order.
 
 ## 7. What moves the numbers
 
@@ -496,15 +500,10 @@ print(f"verdict: {'REGRESSION' if after < before else 'fine'}, "
       f"{(before-after)*len(queries):.0f} of {len(queries)} questions newly broken")
 ```
 
-That is the argument for evals in one cell. Two caveats: with 18 questions each is worth
-0.06 recall, so this can say "150 is a bad idea" but cannot referee 0.83 against 0.94. And it
-measures retrieval only, the half you can check without a language model.
-
-Below is what the windowing does to a long section.
-
-```python
-figures.chunk_windows(sec_len=1100, max_chars=400, overlap=80)
-```
+That is the argument for evals in one cell. Three caveats: with 18 questions each is worth
+0.06 recall, so this can say "150 is a bad idea" but cannot separate 0.89 from 0.94. A marker
+is a substring, so a chunk that merely mentions `EXIF` counts as a hit whether or not it
+answers. And it measures retrieval only, the half you can check without a language model.
 
 **Questions with no single answer.** Two unrelated projects here run a dev server on port
 5173, so "start the frontend dev server" has several correct answers and no way to choose.
@@ -535,9 +534,8 @@ print(f"{len(edited) - len(fresh)} of {len(edited)} embeddings reused")
 ```
 
 One chunk changed, so one needs embedding and its old copy is dropped. A real edit shifts
-the chunks after it too, and their hashes move with their text: identity comes from content
-rather than position. Keyword search is rebuilt regardless, because document frequency is a
-corpus-wide statistic.
+the chunks after it too, and their hashes move with their text: identity comes from content,
+not position. Keyword search is rebuilt regardless, since document frequency is corpus-wide.
 
 The one that catches people: **changing the embedding model means re-embedding everything.**
 Vectors from two models are not comparable, so there is no incremental path. A
@@ -602,14 +600,8 @@ Five terms worth recognising, roughly in order of how much they would move the n
   and search again. This is where both frameworks now start, and it changes who decides when
   to stop rather than any of the machinery above. The retrieval inside the loop is this one.
 
-**LangChain and LlamaIndex** are separate projects rather than layers, and production teams
-often run a LlamaIndex retriever as a tool inside a LangChain loop. Either would replace most
-of this notebook, which is the point of having read it first.
-
-One last connection. **Attention**, the operation at the heart of a transformer, is also a
-search: every word scores itself against every other and holds a blend of what was relevant.
-RAG is the same shape over a store too large for the context window, with a hard cut instead
-of a blend. Keep the top few, drop the rest.
+**LangChain and LlamaIndex** would each replace most of this notebook, and production teams
+often run a LlamaIndex retriever as a tool inside a LangChain loop.
 
 ## The short version
 

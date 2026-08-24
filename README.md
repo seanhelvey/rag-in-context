@@ -12,8 +12,8 @@ Here is the problem in one example. Ask *"how do I wipe my local database and st
 over?"* about a project whose README says `make reset`. Keyword search misses it, because
 you did not guess the author's words. Search by meaning finds it, because "wipe" and
 "reset" sit near each other once words are vectors. Now ask which port local Postgres
-listens on. The answer is the bare token `5433`, so keyword search goes straight to it
-and search by meaning never surfaces it. A real system runs both, and section 4 shows
+listens on. The answer is the bare token `5433`, which keyword search puts second
+and search by meaning never surfaces at all. A real system runs both, and section 4 shows
 each one failing where the other works.
 
 About a twenty minute read. It is written to be *read* as much as run: outputs and figures
@@ -29,25 +29,26 @@ Four methods, scored on 18 hand-labelled questions:
 | method | recall@5 | MRR |
 |---|---|---|
 | by meaning (dense embeddings) | 0.78 | 0.61 |
-| by keyword (BM25) | 0.72 | 0.53 |
-| both, fused (RRF) | 0.83 | 0.53 |
-| fused + rerank (cross-encoder) | **0.94** | **0.78** |
+| by keyword (BM25) | 0.89 | 0.52 |
+| both, fused (RRF) | 0.94 | 0.60 |
+| fused + rerank (cross-encoder) | **0.94** | **0.77** |
 
 **recall@5** is how often the right passage appeared in the top five. **MRR** is how high
 it landed. Grading is at passage level: a labelled question names the exact string a
 correct passage has to contain.
 
-The two search methods land close, and fail on different questions, which is the reason to
-run both. Fusing them lifts recall. Only the reranker fixes the order.
+Keyword search finds more answers, search by meaning ranks them better, and they miss
+different questions, which is the reason to run both. Fusing them lifts recall to 0.94.
+Only the reranker fixes the order.
 
 With 18 questions each one is worth 0.06 recall, so this can say "that change was a bad
-idea" and cannot referee 0.83 against 0.94. Section 6 says so rather than rounding up, and
-section 7 spends a cell watching the eval catch a plausible chunking change that quietly
-breaks four of the eighteen questions.
+idea" and cannot separate 0.89 from 0.94. Section 7 says so rather than rounding up, and
+spends a cell watching the eval catch a plausible chunking change that quietly breaks four of
+the eighteen questions.
 
-One question defeats all four. Two of these projects run a dev server on port 5173, so
-*"start the frontend dev server"* has no single right answer. No retriever fixes that; a
-metadata filter does. The ceiling turns out to be more instructive than the score.
+One question has no single right answer. Two of these projects run a dev server on port
+5173, so *"start the frontend dev server"* is ambiguous rather than hard, and no retriever
+fixes it. A metadata filter does. The ceiling is more instructive than the score.
 
 ## What it covers
 
@@ -77,8 +78,8 @@ Run it from the repo root, since all paths are relative.
 
 ## Why this corpus
 
-13 markdown files, about 12,000 words: READMEs and CLAUDE.md files from 8 public repos of
-mine. Far too small to need retrieval, which is the point. It is a test bed
+13 markdown files, about 12,000 words, mostly READMEs and CLAUDE.md files from 8 public
+repos of mine, plus a SECURITY.md and one guide page. Far too small to need retrieval, which is the point. It is a test bed
 rather than a use case.
 
 Evaluating retrieval means knowing whether a result is *right*, and on an unfamiliar
