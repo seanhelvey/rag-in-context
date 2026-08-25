@@ -3,9 +3,9 @@
 A notebook about retrieval-augmented generation: getting a language model to answer
 questions from documents it was never trained on.
 
-The trick is search. Find the few paragraphs most likely to hold the answer, paste only
-those into the prompt. Nearly all the engineering lives in that finding step, and most of
-it predates the models. This is written as a refresher, and section 1 places each piece
+Search does the work: find the few paragraphs most likely to hold the answer, and paste
+only those into the prompt. Nearly all the engineering lives in that finding step, and
+most of it predates the models. This is written as a refresher, and section 1 places each piece
 against the ML you already know.
 
 Here is the problem in one example. Ask *"how do I wipe my local database and start
